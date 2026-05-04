@@ -1269,6 +1269,15 @@ export default function ProcurementCostAnalysis() {
         <header className="bg-white shadow-sm rounded-2xl p-6 mb-8 border-l-8 border-red-600 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black tracking-tight text-slate-800">採購發包決策輔助系統</h1>
+            <div className="mt-3">
+              <input 
+                type="text" 
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="輸入購案名稱"
+                className="w-full md:w-[360px] p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+              />
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -1309,17 +1318,6 @@ export default function ProcurementCostAnalysis() {
               </div>
               
               <div className="space-y-5">
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-wider mb-1">購案名稱</label>
-                  <input 
-                    type="text" 
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                    placeholder="輸入購案名稱"
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                  />
-                </div>
-
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
                   <button
                     onClick={() => setShowProjectDetails(!showProjectDetails)}
