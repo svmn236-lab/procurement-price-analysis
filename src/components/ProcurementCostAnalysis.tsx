@@ -29,6 +29,7 @@ import {
   Camera,
   GitCompare,
   FolderOpen,
+  Download,
   Lightbulb,
   Building2
 } from 'lucide-react';
@@ -48,6 +49,7 @@ import { cn } from '@/lib/utils';
 import html2canvas from 'html2canvas';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import * as XLSX from 'xlsx';
 
 // --- Types (已整合至單一檔案) ---
 interface Vendor { id: string; name: string; price: number; }
@@ -100,6 +102,37 @@ interface SavedProject {
   overallChatMessages: { role: 'user' | 'model', text: string }[];
   alternatives?: AlternativeProduct[];
   recommendedVendors?: RecommendedVendor[];
+}
+
+interface HistoryExcelRow {
+  匯出版本: string;
+  匯出時間: string;
+  專案ID: string;
+  日期: string;
+  專案名稱: string;
+  品項名稱: string;
+  確認品項描述: string;
+  採購總量: number | '';
+  預算金額: number | '';
+  報價區間: string;
+  AI估算單價: number | null;
+  AI分析結果: string;
+  採購策略: string;
+  廠商報價JSON: string;
+  成本分項JSON: string;
+  歷史估算JSON: string;
+  補充規格JSON: string;
+  彙總規格JSON: string;
+  整體對話JSON: string;
+  替代方案JSON: string;
+  推薦廠商JSON: string;
+  文件編號: string;
+  部門: string;
+  科別: string;
+  申請人: string;
+  承辦科: string;
+  承辦人: string;
+  規格已確認: boolean;
 }
 
 const INITIAL_VENDORS: Vendor[] = [
@@ -172,6 +205,7 @@ export default function ProcurementCostAnalysis() {
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [showSavedProjectsModal, setShowSavedProjectsModal] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [historyFeedback, setHistoryFeedback] = useState('');
 
   const [alternatives, setAlternatives] = useState<AlternativeProduct[]>([]);
   const [showAlternativesModal, setShowAlternativesModal] = useState(false);
@@ -184,6 +218,7 @@ export default function ProcurementCostAnalysis() {
   const appRef = React.useRef<HTMLDivElement>(null);
   const confirmedItemRef = React.useRef<HTMLDivElement>(null);
   const aiInsightsRef = React.useRef<HTMLDivElement>(null);
+  const historyImportRef = React.useRef<HTMLInputElement>(null);
 
   const activeCostItem = useMemo(() => {
     return costBreakdown.find(item => item.item === activeChatId) || null;
@@ -272,38 +307,39 @@ export default function ProcurementCostAnalysis() {
     setRecommendedVendors([]);
   };
 
+  const buildProjectSnapshot = (projectId: string, desc?: string, overrides?: Partial<SavedProject>): SavedProject => ({
+    id: projectId,
+    timestamp: Date.now(),
+    projectName: projectName || '未命名購案',
+    itemName,
+    docNumber,
+    department,
+    section,
+    applicant,
+    budgetAmount,
+    handlingSection,
+    handler,
+    totalQty,
+    vendors,
+    supplementarySpecs,
+    consolidatedSpecs,
+    isSpecsConfirmed,
+    confirmedItemDescription: desc !== undefined ? desc : confirmedItemDescription,
+    quoteTimeframe,
+    aiInsights,
+    aiEstimatedPrice,
+    costBreakdown,
+    costHistory,
+    overallChatMessages,
+    alternatives,
+    recommendedVendors,
+    ...overrides
+  });
+
   const saveCurrentProject = (desc?: string, overrides?: Partial<SavedProject>) => {
+    const projectId = currentProjectId || Date.now().toString();
     setSavedProjects(prev => {
-      const projectId = currentProjectId || Date.now().toString();
-      
-      const projectToSave: SavedProject = {
-        id: projectId,
-        timestamp: Date.now(),
-        projectName: projectName || '未命名購案',
-        itemName,
-        docNumber,
-        department,
-        section,
-        applicant,
-        budgetAmount,
-        handlingSection,
-        handler,
-        totalQty,
-        vendors,
-        supplementarySpecs,
-        consolidatedSpecs,
-        isSpecsConfirmed,
-        confirmedItemDescription: desc !== undefined ? desc : confirmedItemDescription,
-        quoteTimeframe,
-        aiInsights,
-        aiEstimatedPrice,
-        costBreakdown,
-        costHistory,
-        overallChatMessages,
-        alternatives,
-        recommendedVendors,
-        ...overrides
-      };
+      const projectToSave = buildProjectSnapshot(projectId, desc, overrides);
 
       const existingIndex = prev.findIndex(p => p.id === projectId);
       if (existingIndex >= 0) {
@@ -314,10 +350,7 @@ export default function ProcurementCostAnalysis() {
         return [projectToSave, ...prev].slice(0, 5);
       }
     });
-
-    if (!currentProjectId) {
-      setCurrentProjectId(Date.now().toString()); // It's fine if it's slightly off from the actual ID, but better to set it properly. Wait, let's just use a ref or update state.
-    }
+    setCurrentProjectId(projectId);
   };
 
   const loadProject = (project: SavedProject) => {
@@ -346,6 +379,206 @@ export default function ProcurementCostAnalysis() {
     setRecommendedVendors(project.recommendedVendors || []);
     setShowSavedProjectsModal(false);
     setCurrentProjectId(project.id);
+  };
+
+  const getCurrentOrLatestProject = () => {
+    if (currentProjectId) {
+      const existing = savedProjects.find(p => p.id === currentProjectId);
+      if (existing) return existing;
+    }
+    return buildProjectSnapshot(currentProjectId || Date.now().toString());
+  };
+
+  const exportHistoryAsExcel = () => {
+    const currentSnapshot = getCurrentOrLatestProject();
+    const mergedProjects = [currentSnapshot, ...savedProjects.filter(p => p.id !== currentSnapshot.id)].slice(0, 50);
+
+    const rows: HistoryExcelRow[] = mergedProjects.map((project) => {
+      const strategy =
+        project.costBreakdown
+          .slice(0, 3)
+          .map((item) => `${item.item}: ${item.basis}`)
+          .join(' | ') || '無';
+
+      return {
+        匯出版本: 'xlsx-v1',
+        匯出時間: new Date().toISOString(),
+        專案ID: project.id,
+        日期: new Date(project.timestamp).toISOString(),
+        專案名稱: project.projectName,
+        品項名稱: project.itemName,
+        確認品項描述: project.confirmedItemDescription,
+        採購總量: project.totalQty,
+        預算金額: project.budgetAmount,
+        報價區間: project.quoteTimeframe,
+        AI估算單價: project.aiEstimatedPrice,
+        AI分析結果: project.aiInsights,
+        採購策略: strategy,
+        廠商報價JSON: JSON.stringify(project.vendors || []),
+        成本分項JSON: JSON.stringify(project.costBreakdown || []),
+        歷史估算JSON: JSON.stringify(project.costHistory || []),
+        補充規格JSON: JSON.stringify(project.supplementarySpecs || []),
+        彙總規格JSON: JSON.stringify(project.consolidatedSpecs || []),
+        整體對話JSON: JSON.stringify(project.overallChatMessages || []),
+        替代方案JSON: JSON.stringify(project.alternatives || []),
+        推薦廠商JSON: JSON.stringify(project.recommendedVendors || []),
+        文件編號: project.docNumber || '',
+        部門: project.department || '',
+        科別: project.section || '',
+        申請人: project.applicant || '',
+        承辦科: project.handlingSection || '',
+        承辦人: project.handler || '',
+        規格已確認: project.isSpecsConfirmed,
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'History');
+    XLSX.writeFile(workbook, `procurement-history-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    setHistoryFeedback(`已匯出 ${mergedProjects.length} 筆紀錄`);
+  };
+
+  const parseJsonCell = <T,>(value: unknown, fallback: T): T => {
+    if (typeof value !== 'string' || !value.trim()) return fallback;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const normalizeImportedProject = (raw: Record<string, unknown>, index: number): SavedProject | null => {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const requiredFields = ['專案ID', '日期', '專案名稱', '廠商報價JSON', '成本分項JSON'];
+    const hasRequired = requiredFields.every(field => Object.prototype.hasOwnProperty.call(raw, field));
+    if (!hasRequired) return null;
+
+    const vendors = parseJsonCell<Vendor[]>(raw['廠商報價JSON'], []);
+    const costBreakdownImported = parseJsonCell<CostItem[]>(raw['成本分項JSON'], []);
+    const costHistoryImported = parseJsonCell<CostHistoryEntry[]>(raw['歷史估算JSON'], []);
+    const supplementarySpecsImported = parseJsonCell<string[]>(raw['補充規格JSON'], ['']);
+    const consolidatedSpecsImported = parseJsonCell<ConsolidatedSpec[]>(raw['彙總規格JSON'], []);
+    const overallChatMessagesImported = parseJsonCell<{ role: 'user' | 'model', text: string }[]>(raw['整體對話JSON'], []);
+    const alternativesImported = parseJsonCell<AlternativeProduct[]>(raw['替代方案JSON'], []);
+    const recommendedVendorsImported = parseJsonCell<RecommendedVendor[]>(raw['推薦廠商JSON'], []);
+
+    if (!Array.isArray(vendors) || !Array.isArray(costBreakdownImported)) return null;
+
+    const totalQtyRaw = raw['採購總量'];
+    const budgetRaw = raw['預算金額'];
+    const aiPriceRaw = raw['AI估算單價'];
+
+    const timestamp = Date.parse(String(raw['日期'] || ''));
+
+    return {
+      id: String(raw['專案ID'] || `${Date.now()}-${index}`),
+      timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp,
+      projectName: String(raw['專案名稱'] || '未命名購案'),
+      itemName: String(raw['品項名稱'] || ''),
+      docNumber: String(raw['文件編號'] || ''),
+      department: String(raw['部門'] || ''),
+      section: String(raw['科別'] || ''),
+      applicant: String(raw['申請人'] || ''),
+      budgetAmount: budgetRaw === '' || budgetRaw === undefined || budgetRaw === null ? '' : Number(budgetRaw || 0),
+      handlingSection: String(raw['承辦科'] || ''),
+      handler: String(raw['承辦人'] || ''),
+      totalQty: totalQtyRaw === '' || totalQtyRaw === undefined || totalQtyRaw === null ? '' : Number(totalQtyRaw || 0),
+      vendors,
+      supplementarySpecs: Array.isArray(supplementarySpecsImported) ? supplementarySpecsImported : [''],
+      consolidatedSpecs: Array.isArray(consolidatedSpecsImported) ? consolidatedSpecsImported : [],
+      isSpecsConfirmed: Boolean(raw['規格已確認']),
+      confirmedItemDescription: String(raw['確認品項描述'] || ''),
+      quoteTimeframe: String(raw['報價區間'] || ''),
+      aiInsights: String(raw['AI分析結果'] || ''),
+      aiEstimatedPrice: aiPriceRaw === '' || aiPriceRaw === undefined || aiPriceRaw === null ? null : Number(aiPriceRaw),
+      costBreakdown: costBreakdownImported,
+      costHistory: Array.isArray(costHistoryImported) ? costHistoryImported : [],
+      overallChatMessages: Array.isArray(overallChatMessagesImported) ? overallChatMessagesImported : [],
+      alternatives: Array.isArray(alternativesImported) ? alternativesImported : [],
+      recommendedVendors: Array.isArray(recommendedVendorsImported) ? recommendedVendorsImported : [],
+    };
+  };
+
+  const handleImportHistoryFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const historySheet = workbook.Sheets['History'] || workbook.Sheets[workbook.SheetNames[0]];
+      if (!historySheet) {
+        setHistoryFeedback('匯入失敗：找不到工作表');
+        return;
+      }
+
+      const rawProjects = XLSX.utils.sheet_to_json<Record<string, unknown>>(historySheet, { defval: '' });
+      if (rawProjects.length === 0) {
+        setHistoryFeedback('匯入失敗：Excel 內容為空');
+        return;
+      }
+
+      // 防呆檢查：至少需要這些欄位，避免匯入錯誤格式檔案
+      const requiredColumns = ['專案ID', '日期', '專案名稱', '廠商報價JSON', '成本分項JSON'];
+      const firstRow = rawProjects[0];
+      const missingColumns = requiredColumns.filter(col => !Object.prototype.hasOwnProperty.call(firstRow, col));
+      if (missingColumns.length > 0) {
+        setHistoryFeedback(`匯入失敗：缺少必要欄位 ${missingColumns.join('、')}`);
+        return;
+      }
+
+      const normalized = rawProjects
+        .map((p: Record<string, unknown>, idx: number) => normalizeImportedProject(p, idx))
+        .filter((p: SavedProject | null): p is SavedProject => Boolean(p))
+        .sort((a: SavedProject, b: SavedProject) => b.timestamp - a.timestamp);
+
+      if (normalized.length === 0) {
+        setHistoryFeedback('匯入失敗：Excel 格式不符或資料無法解析');
+        return;
+      }
+
+      setSavedProjects(normalized.slice(0, 50));
+      const toLoad = normalized[0];
+      loadProject(toLoad);
+      setHistoryFeedback(`已匯入 ${normalized.length} 筆紀錄並載入「${toLoad.projectName}」`);
+    } catch (error) {
+      console.error('Import History Error:', error);
+      setHistoryFeedback('匯入失敗：請確認 .xlsx 格式是否正確');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const getHistoricalLearningContext = () => {
+    const candidates = savedProjects
+      .filter(p => p.id !== currentProjectId && (p.aiInsights?.trim() || p.costBreakdown.length > 0))
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 3);
+
+    if (candidates.length === 0) return '';
+
+    const context = candidates.map((p, idx) => {
+      const keyBreakdown = p.costBreakdown
+        .slice(0, 3)
+        .map(b => `${b.item}: ${b.basis} / ${b.explanation}`)
+        .join('\n');
+      return [
+        `案例 ${idx + 1}：${p.projectName}（${new Date(p.timestamp).toLocaleDateString()}）`,
+        `品項：${p.confirmedItemDescription || p.itemName || '未填寫'}`,
+        `報價區間：${p.quoteTimeframe || '未指定'}`,
+        `談判/風險重點：${p.aiInsights || '無'}`,
+        `成功判斷與議價邏輯摘要：\n${keyBreakdown || '無'}`
+      ].join('\n');
+    }).join('\n\n');
+
+    return `
+      Historical Learning Context (from prior successful analyses):
+      ${context}
+
+      Please reuse applicable judgement criteria and negotiation logic from these cases, but adapt to current specs and market timeframe.
+    `;
   };
 
   const handleScreenshot = async () => {
@@ -790,6 +1023,7 @@ export default function ProcurementCostAnalysis() {
         
         CRITICAL INSTRUCTION:
         When estimating the cost breakdown and the estimated market price, you MUST base your calculations strictly on the "Total Quantity" (${totalQty}), the specifications provided above, and reflect the market conditions for the "Valid Quote Timeframe" (${quoteTimeframe || '未指定'}).
+        ${getHistoricalLearningContext()}
         
         Please provide your analysis strictly in JSON format matching the response schema.
       `;
@@ -1280,6 +1514,27 @@ export default function ProcurementCostAnalysis() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <input
+              ref={historyImportRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={handleImportHistoryFile}
+            />
+            <button
+              onClick={exportHistoryAsExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-full font-bold transition-colors text-sm"
+            >
+              <Download size={16} />
+              匯出 Excel
+            </button>
+            <button
+              onClick={() => historyImportRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-700 rounded-full font-bold transition-colors text-sm"
+            >
+              <Upload size={16} />
+              匯入 Excel
+            </button>
             <button
               onClick={handleScreenshot}
               className="flex items-center gap-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-full font-bold transition-colors text-sm"
@@ -1299,6 +1554,11 @@ export default function ProcurementCostAnalysis() {
             </div>
           </div>
         </header>
+        {historyFeedback && (
+          <div className="mb-4 px-4 py-2 rounded-xl bg-blue-50 border border-blue-100 text-sm font-bold text-blue-700">
+            {historyFeedback}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left Column: Inputs */}
@@ -1749,7 +2009,7 @@ export default function ProcurementCostAnalysis() {
           </div>
 
           {/* Right Column: Results */}
-          <div className="lg:col-span-8 space-y-8">
+          <div className="lg:col-span-5 space-y-8">
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <motion.div 
@@ -2058,6 +2318,43 @@ export default function ProcurementCostAnalysis() {
                 </AnimatePresence>
               </section>
             )}
+          </div>
+
+          {/* Right Column: History Panel */}
+          <div className="lg:col-span-3">
+            <section className="bg-white p-5 rounded-2xl shadow-xl border border-slate-200 sticky top-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-black text-slate-700 flex items-center gap-2">
+                  <FolderOpen size={16} className="text-blue-600" />
+                  歷史紀錄清單
+                </h3>
+                <span className="text-xs font-bold text-slate-400">{savedProjects.length} 筆</span>
+              </div>
+              <div className="space-y-3 max-h-[72vh] overflow-y-auto custom-scrollbar pr-1">
+                {savedProjects.length === 0 ? (
+                  <div className="text-sm text-slate-400 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                    尚無歷史紀錄，可先執行分析後儲存，或直接匯入 Excel。
+                  </div>
+                ) : (
+                  savedProjects.map((project) => (
+                    <button
+                      key={project.id}
+                      onClick={() => loadProject(project)}
+                      className={cn(
+                        "w-full text-left p-3 rounded-xl border transition-all",
+                        currentProjectId === project.id
+                          ? "border-blue-300 bg-blue-50"
+                          : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50"
+                      )}
+                    >
+                      <p className="text-sm font-black text-slate-800 truncate">{project.projectName}</p>
+                      <p className="text-xs text-slate-500 mt-1 truncate">品項：{project.itemName || '未填寫'}</p>
+                      <p className="text-xs text-slate-400 mt-1">{new Date(project.timestamp).toLocaleString()}</p>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
           </div>
         </div>
       </div>
