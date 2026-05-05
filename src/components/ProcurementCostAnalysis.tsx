@@ -3455,7 +3455,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
 
           {/* Right Column: History Panel */}
           <div className="lg:col-span-3">
-            <section className="bg-white p-5 rounded-2xl shadow-xl border border-slate-200 sticky top-6">
+            <section className="bg-white p-5 rounded-2xl shadow-xl border border-slate-200 sticky top-6 max-h-[calc(100vh-48px)] flex flex-col overflow-hidden min-h-0">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-black text-slate-700 flex items-center gap-2">
                   <FolderOpen size={16} className="text-blue-600" />
@@ -3488,7 +3488,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                 )}
               </div>
 
-              <div className="mt-6 pt-5 border-t border-slate-200">
+              <div className="mt-6 pt-5 border-t border-slate-200 flex flex-col min-h-0 flex-1">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-black text-slate-700 flex items-center gap-2">
                     <BrainCircuit size={16} className="text-violet-600" />
@@ -3505,50 +3505,52 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                   )}
                 </div>
 
-                {!selectedAnalysisItem ? (
-                  <div className="p-4 rounded-2xl bg-violet-50 border border-violet-200 text-slate-700 text-sm font-medium flex gap-2 items-start">
-                    <Lightbulb className="w-5 h-5 shrink-0 text-violet-700 mt-0.5" />
-                    <span>請點擊左側表格的「AI 合理預估」金額，查看詳細成本分析。</span>
-                  </div>
-                ) : isPhase2AnalysisLoading ? (
-                  <div className="p-4 rounded-2xl bg-white border border-slate-200 text-slate-700 text-sm font-medium flex gap-2 items-center">
-                    <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
-                    <span>議價專屬 AI 助理正在產生分析…</span>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {phase2AnalysisError && (
-                      <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex gap-2 items-start">
-                        <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-                        <span>{phase2AnalysisError}</span>
-                      </div>
-                    )}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">項目名稱與金額</p>
-                      <p className="mt-2 text-base font-black text-slate-900">【{selectedAnalysisItem.item}】 AI 基準價：<span className="font-mono text-emerald-700">${selectedAnalysisItem.aiEstimate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
-                      <p className="mt-2 text-sm text-slate-600">廠商報價：<span className="font-mono text-slate-800">${selectedAnalysisItem.vendorQuote.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
-                      <p className="mt-1 text-sm text-slate-600">差異金額：<span className="font-mono text-slate-800">{selectedAnalysisItem.varianceAmount > 0 ? '+' : ''}${selectedAnalysisItem.varianceAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+                <div className="flex-1 min-h-0 overflow-y-auto pr-4 custom-scrollbar">
+                  {!selectedAnalysisItem ? (
+                    <div className="p-4 rounded-2xl bg-violet-50 border border-violet-200 text-slate-700 text-sm font-medium flex gap-2 items-start">
+                      <Lightbulb className="w-5 h-5 shrink-0 text-violet-700 mt-0.5" />
+                      <span>請點擊左側表格的「AI 合理預估」金額，查看詳細成本分析。</span>
                     </div>
+                  ) : isPhase2AnalysisLoading ? (
+                    <div className="p-4 rounded-2xl bg-white border border-slate-200 text-slate-700 text-sm font-medium flex gap-2 items-center">
+                      <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
+                      <span>議價專屬 AI 助理正在產生分析…</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {phase2AnalysisError && (
+                        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex gap-2 items-start">
+                          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                          <span>{phase2AnalysisError}</span>
+                        </div>
+                      )}
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">項目名稱與金額</p>
+                        <p className="mt-2 text-base font-black text-slate-900">【{selectedAnalysisItem.item}】 AI 基準價：<span className="font-mono text-emerald-700">${selectedAnalysisItem.aiEstimate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+                        <p className="mt-2 text-sm text-slate-600">廠商報價：<span className="font-mono text-slate-800">${selectedAnalysisItem.vendorQuote.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+                        <p className="mt-1 text-sm text-slate-600">差異金額：<span className="font-mono text-slate-800">{selectedAnalysisItem.varianceAmount > 0 ? '+' : ''}${selectedAnalysisItem.varianceAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+                      </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-wider">
-                        <FileText size={14} className="text-slate-500" />
-                        估算邏輯
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-wider">
+                          <FileText size={14} className="text-slate-500" />
+                          估算邏輯
+                        </div>
+                        <p className="mt-3 text-sm leading-relaxed text-slate-700 whitespace-pre-line">{selectedAnalysisItem.calculationLogic}</p>
                       </div>
-                      <p className="mt-3 text-sm leading-relaxed text-slate-700 whitespace-pre-line">{selectedAnalysisItem.calculationLogic}</p>
-                    </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-wider">
-                        <Lightbulb size={14} className="text-amber-500" />
-                        市場洞察與顧問建議
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-wider">
+                          <Lightbulb size={14} className="text-amber-500" />
+                          市場洞察與顧問建議
+                        </div>
+                        <p className="mt-3 text-sm leading-relaxed text-slate-700 whitespace-pre-line">
+                          {selectedAnalysisItem.consultantAnalysis || '—'}
+                        </p>
                       </div>
-                      <p className="mt-3 text-sm leading-relaxed text-slate-700 whitespace-pre-line">
-                        {selectedAnalysisItem.consultantAnalysis || '—'}
-                      </p>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </section>
           </div>
