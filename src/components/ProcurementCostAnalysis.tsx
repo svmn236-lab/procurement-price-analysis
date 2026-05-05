@@ -84,11 +84,21 @@ interface VendorPdfLineItem {
   amount: number;
 }
 
+/** 單項議價記錄 */
+interface NegotiationRecord {
+  item: string;
+  negotiatedPrice: number;
+  isAccepted: boolean;
+  reason: string;
+  timestamp: number;
+}
+
 /** 第二階段：對齊後之差異分析列 */
 interface Phase2AlignedRow {
   item: string;
   vendorQuote: number;
   aiEstimate: number;
+  calculationLogic: string; // 新增：AI 預估的計算邏輯說明
   varianceAmount: number;
   variancePercent: number | null;
 }
@@ -98,6 +108,8 @@ interface Phase2State {
   vendorPdfParsedLines: VendorPdfLineItem[];
   alignedRows: Phase2AlignedRow[];
   negotiationStrategy: string;
+  negotiationRecords: NegotiationRecord[]; // 新增：議價記錄
+  phase2ChatMessages: { role: 'user' | 'assistant', text: string }[]; // 新增：專屬對話
 }
 
 interface SavedProject {
@@ -193,7 +205,7 @@ function extractJsonArrayFromText(text: string): VendorPdfLineItem[] {
 }
 
 function rowsToVarianceTable(
-  rows: { item: string; vendorQuote: number; aiReasonableEstimate: number }[]
+  rows: { item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string }[]
 ): Phase2AlignedRow[] {
   return rows.map((r) => {
     const vendorQuote = r.vendorQuote;
@@ -207,6 +219,7 @@ function rowsToVarianceTable(
       item: r.item,
       vendorQuote,
       aiEstimate,
+      calculationLogic: r.calculationLogic,
       varianceAmount,
       variancePercent,
     };
@@ -227,6 +240,9 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export default function ProcurementCostAnalysis() {
+  // 頁籤狀態管理
+  const [activeTab, setActiveTab] = useState<'phase1' | 'phase2'>('phase1');
+
   const [itemName, setItemName] = useState('');
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [itemChatMessages, setItemChatMessages] = useState<{role: 'user'|'ai', text: string}[]>([]);
@@ -308,6 +324,12 @@ export default function ProcurementCostAnalysis() {
   const [isPhase2Parsing, setIsPhase2Parsing] = useState(false);
   const [isPhase2Aligning, setIsPhase2Aligning] = useState(false);
   const [isPhase2Negotiating, setIsPhase2Negotiating] = useState(false);
+  const [selectedAiDetailRow, setSelectedAiDetailRow] = useState<Phase2AlignedRow | null>(null);
+
+  // 議價相關狀態
+  const [expandedNegotiationItems, setExpandedNegotiationItems] = useState<string[]>([]);
+  const [isPhase2ChatLoading, setIsPhase2ChatLoading] = useState(false);
+  const [phase2ChatInput, setPhase2ChatInput] = useState('');
   const vendorPdfInputRef = React.useRef<HTMLInputElement>(null);
 
   const appRef = React.useRef<HTMLDivElement>(null);
@@ -578,6 +600,8 @@ export default function ProcurementCostAnalysis() {
           vendorPdfParsedLines: parsed.vendorPdfParsedLines,
           alignedRows: parsed.alignedRows,
           negotiationStrategy: typeof parsed.negotiationStrategy === 'string' ? parsed.negotiationStrategy : '',
+          negotiationRecords: Array.isArray(parsed.negotiationRecords) ? parsed.negotiationRecords : [],
+          phase2ChatMessages: Array.isArray(parsed.phase2ChatMessages) ? parsed.phase2ChatMessages : [],
         };
       }
     }
@@ -1130,7 +1154,7 @@ export default function ProcurementCostAnalysis() {
   /** 步驟二：將第一階段模擬成本依廠商項目分類重新拆解配對 */
   const alignCostStructures = async (
     vendorLines: VendorPdfLineItem[]
-  ): Promise<{ item: string; vendorQuote: number; aiReasonableEstimate: number }[]> => {
+  ): Promise<{ item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string }[]> => {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     const inputA = JSON.stringify(
       {
@@ -1160,6 +1184,7 @@ ${inputB}
 2. item 必須與輸入 B 該列的 item 文字完全一致。
 3. vendorQuote 必須等於輸入 B 對應項目的 amount（數值）。
 4. aiReasonableEstimate 為依輸入 A 整體合理預估，配對到該廠商分類後的 AI 合理金額（可為小數，最終四捨五入至合理精度）。
+5. calculationLogic 必須詳細說明 AI 預估金額的計算邏輯，例如："原物料 5kg * 單價 100 + 5% 耗損" 或 "人工費 8小時 * 時薪 150 + 10% 管理費"。
 
 請嚴格以 JSON 格式回覆，不要包含其他文字。
 `;
@@ -1181,8 +1206,9 @@ ${inputB}
                   item: { type: Type.STRING },
                   vendorQuote: { type: Type.NUMBER },
                   aiReasonableEstimate: { type: Type.NUMBER },
+                  calculationLogic: { type: Type.STRING },
                 },
-                required: ['item', 'vendorQuote', 'aiReasonableEstimate'],
+                required: ['item', 'vendorQuote', 'aiReasonableEstimate', 'calculationLogic'],
               },
             },
           },
@@ -1193,22 +1219,44 @@ ${inputB}
 
     const data = JSON.parse(response.text || '{}');
     const rows = Array.isArray(data.rows) ? data.rows : [];
-    return rows as { item: string; vendorQuote: number; aiReasonableEstimate: number }[];
+    return rows as { item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string }[];
   };
 
   /** 步驟三：依差異分析產出談判策略 */
   const generatePhase2NegotiationStrategy = async (
-    aligned: Phase2AlignedRow[]
+    aligned: Phase2AlignedRow[],
+    negotiationRecords: NegotiationRecord[] = []
   ): Promise<string> => {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+
+    const hasNegotiationFeedback = negotiationRecords.length > 0;
+    const rejectedItems = negotiationRecords.filter(r => !r.isAccepted);
+    const acceptedItems = negotiationRecords.filter(r => r.isAccepted);
+
     const prompt = `
 你是一位資深採購談判顧問。以下為購案「${confirmedItemDescription || itemName}」第二階段「廠商 PDF 報價 vs AI 合理預估」的差異分析（JSON）：
 ${JSON.stringify(aligned, null, 2)}
 
-請以繁體中文、Markdown 格式撰寫「針對性談判策略」，必須具體包含：
+${hasNegotiationFeedback ? `
+【使用者議價回饋紀錄】：
+${JSON.stringify(negotiationRecords, null, 2)}
+
+已接受項目：${acceptedItems.length > 0 ? acceptedItems.map(r => `${r.item} (議價後: $${r.negotiatedPrice})`).join('、') : '無'}
+拒絕項目及原因：${rejectedItems.length > 0 ? rejectedItems.map(r => `${r.item} (原因: ${r.reason})`).join('；') : '無'}
+` : ''}
+
+請以繁體中文、Markdown 格式撰寫「${hasNegotiationFeedback ? '第二輪進階談判策略' : '針對性談判策略'}」，必須具體包含：
+
+${hasNegotiationFeedback ? `
+1. **第一輪議價結果分析**：總結使用者議價成果，計算總降價幅度。
+2. **針對拒絕項目的第二輪攻防**：針對廠商拒絕降價的項目，提供更深入的談判策略與替代方案。
+3. **新談判話術建議**：根據廠商的反應，提供更精準的第二輪殺價說法。
+4. **風險重新評估**：根據議價結果，重新評估潛在風險與隱藏成本。
+` : `
 1. **灌水最嚴重的細項**：指出廠商在哪個成本細項利潤偏高或灌水最嚴重（附數字依據）。
 2. **攻防話術建議**：針對異常項目給出可直接使用的殺價說法（條列）。
 3. **風險與隱藏成本**：提醒可能遺漏的費用、規格陷阱或合約風險。
+`}
 
 語氣專業、可直接對內部簡報使用。`;
 
@@ -1220,6 +1268,227 @@ ${JSON.stringify(aligned, null, 2)}
       },
     });
     return (response.text || '').trim() || '（未能產生談判策略，請稍後重試）';
+  };
+
+  const toggleNegotiationForm = (item: string) => {
+    setExpandedNegotiationItems(prev =>
+      prev.includes(item)
+        ? prev.filter(i => i !== item)
+        : [...prev, item]
+    );
+  };
+
+  const saveNegotiationRecord = (record: NegotiationRecord) => {
+    setPhase2(prev => {
+      if (!prev) return prev;
+      const existingIndex = prev.negotiationRecords?.findIndex(r => r.item === record.item) ?? -1;
+      const newRecords = [...(prev.negotiationRecords || [])];
+
+      if (existingIndex >= 0) {
+        newRecords[existingIndex] = record;
+      } else {
+        newRecords.push(record);
+      }
+
+      const updatedPhase2 = { ...prev, negotiationRecords: newRecords };
+      saveCurrentProject(undefined, { phase2: updatedPhase2 });
+      return updatedPhase2;
+    });
+    setExpandedNegotiationItems(prev => prev.filter(i => i !== record.item));
+  };
+
+  const handlePhase2ChatMessage = async () => {
+    if (!phase2ChatInput.trim() || !phase2) return;
+
+    const userMessage = phase2ChatInput.trim();
+    setPhase2ChatInput('');
+    setIsPhase2ChatLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+
+      const contextData = {
+        alignedRows: phase2.alignedRows,
+        negotiationRecords: phase2.negotiationRecords || [],
+        itemDescription: confirmedItemDescription || itemName,
+        quoteTimeframe: quoteTimeframe || '未指定',
+      };
+
+      const prompt = `
+你是一位專業的採購議價顧問。目前正在討論購案「${confirmedItemDescription || itemName}」的廠商報價分析。
+
+當前差異分析數據：
+${JSON.stringify(contextData, null, 2)}
+
+歷史對話：
+${phase2.phase2ChatMessages?.map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.text}`).join('\n') || '無'}
+使用者問題：${userMessage}
+
+請根據當前的報價差異數據和議價記錄，專業回答使用者的問題。請提供具體的市場洞察、議價建議或成本分析。
+
+請以繁體中文回答，保持專業且實用。`;
+
+      const response = await ai.models.generateContent({
+        model: GEMINI_PHASE2_TEXT_MODEL,
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      });
+
+      const aiReply = response.text || '抱歉，我現在無法回答這個問題。';
+
+      setPhase2(prev => {
+        if (!prev) return prev;
+        const newMessages: Phase2State['phase2ChatMessages'] = [
+          ...(prev.phase2ChatMessages || []),
+          { role: 'user' as const, text: userMessage },
+          { role: 'assistant' as const, text: aiReply }
+        ];
+        const updatedPhase2 = { ...prev, phase2ChatMessages: newMessages };
+        saveCurrentProject(undefined, { phase2: updatedPhase2 });
+        return updatedPhase2;
+      });
+
+    } catch (error: any) {
+      console.error('Phase 2 Chat Error:', error);
+      let errorMessage = '通訊發生錯誤，請稍後再試。';
+      if (error?.message?.includes('429') || error?.message?.includes('quota') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
+        errorMessage = 'API 請求次數已達上限 (Quota Exceeded)。請稍後再試，或檢查您的 API Key 額度。';
+      }
+
+      setPhase2(prev => {
+        if (!prev) return prev;
+        const newMessages: Phase2State['phase2ChatMessages'] = [
+          ...(prev.phase2ChatMessages || []),
+          { role: 'user' as const, text: userMessage },
+          { role: 'assistant' as const, text: errorMessage }
+        ];
+        return { ...prev, phase2ChatMessages: newMessages };
+      });
+    } finally {
+      setIsPhase2ChatLoading(false);
+    }
+  };
+
+  const regenerateNegotiationStrategy = async () => {
+    if (!phase2) return;
+
+    setIsPhase2Negotiating(true);
+    try {
+      const newStrategy = await generatePhase2NegotiationStrategy(
+        phase2.alignedRows,
+        phase2.negotiationRecords || []
+      );
+
+      setPhase2(prev => {
+        if (!prev) return prev;
+        const updatedPhase2 = { ...prev, negotiationStrategy: newStrategy };
+        saveCurrentProject(undefined, { phase2: updatedPhase2 });
+        return updatedPhase2;
+      });
+    } catch (error) {
+      console.error('Regenerate Strategy Error:', error);
+    } finally {
+      setIsPhase2Negotiating(false);
+    }
+  };
+
+  // 議價表單組件
+  const NegotiationForm = ({
+    item,
+    currentRecord,
+    onSave,
+    onCancel
+  }: {
+    item: string;
+    currentRecord?: NegotiationRecord;
+    onSave: (record: NegotiationRecord) => void;
+    onCancel: () => void;
+  }) => {
+    const [negotiatedPrice, setNegotiatedPrice] = useState(currentRecord?.negotiatedPrice || 0);
+    const [isAccepted, setIsAccepted] = useState(currentRecord?.isAccepted ?? true);
+    const [reason, setReason] = useState(currentRecord?.reason || '');
+
+    const handleSave = () => {
+      const record: NegotiationRecord = {
+        item,
+        negotiatedPrice,
+        isAccepted,
+        reason: reason.trim(),
+        timestamp: Date.now(),
+      };
+      onSave(record);
+    };
+
+    return (
+      <div className="bg-white border border-violet-200 rounded-xl p-4 shadow-sm">
+        <h5 className="font-bold text-violet-900 mb-3 flex items-center gap-2">
+          <MessageSquare size={16} />
+          {item} - 議價回饋
+        </h5>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1">議價後金額</label>
+            <input
+              type="number"
+              step="0.01"
+              value={negotiatedPrice}
+              onChange={(e) => setNegotiatedPrice(Number(e.target.value) || 0)}
+              className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:border-violet-500 outline-none"
+              placeholder="輸入議價後金額"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1">接受狀態</label>
+            <div className="flex gap-2">
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  checked={isAccepted}
+                  onChange={() => setIsAccepted(true)}
+                  className="text-violet-600"
+                />
+                <span className="text-sm text-emerald-700 font-medium">接受</span>
+              </label>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  checked={!isAccepted}
+                  onChange={() => setIsAccepted(false)}
+                  className="text-violet-600"
+                />
+                <span className="text-sm text-red-700 font-medium">不接受</span>
+              </label>
+            </div>
+          </div>
+          <div className="md:col-span-1">
+            <label className="block text-xs font-bold text-slate-600 mb-1">原因說明</label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:border-violet-500 outline-none resize-none"
+              rows={2}
+              placeholder={isAccepted ? "為什麼接受這個價格？" : "為什麼不接受？廠商的反應是什麼？"}
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-3 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors"
+          >
+            儲存議價記錄
+          </button>
+        </div>
+      </div>
+    );
   };
 
   const handleVendorQuotePdfSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1264,6 +1533,8 @@ ${JSON.stringify(aligned, null, 2)}
         vendorPdfParsedLines,
         alignedRows,
         negotiationStrategy,
+        negotiationRecords: [], // 初始化議價記錄
+        phase2ChatMessages: [], // 初始化專屬對話
       };
       setPhase2(nextPhase2);
       saveCurrentProject(undefined, { phase2: nextPhase2 });
@@ -1851,8 +2122,39 @@ ${JSON.stringify(aligned, null, 2)}
           </div>
         )}
 
+        {/* 頁籤導覽列 */}
+        <div className="mb-6 flex items-center gap-0 bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden">
+          <button
+            onClick={() => setActiveTab('phase1')}
+            className={cn(
+              'flex-1 px-6 py-4 font-bold text-sm uppercase tracking-wider transition-all relative flex items-center justify-center gap-2',
+              activeTab === 'phase1'
+                ? 'text-blue-700 bg-gradient-to-b from-blue-50 to-blue-50 border-b-4 border-blue-600'
+                : 'text-slate-500 hover:text-slate-700 bg-white hover:bg-slate-50'
+            )}
+          >
+            <BrainCircuit size={18} />
+            第一階段：AI 成本模擬
+          </button>
+          <div className="w-px h-8 bg-slate-200" />
+          <button
+            onClick={() => setActiveTab('phase2')}
+            className={cn(
+              'flex-1 px-6 py-4 font-bold text-sm uppercase tracking-wider transition-all relative flex items-center justify-center gap-2',
+              activeTab === 'phase2'
+                ? 'text-violet-700 bg-gradient-to-b from-violet-50 to-violet-50 border-b-4 border-violet-600'
+                : 'text-slate-500 hover:text-slate-700 bg-white hover:bg-slate-50'
+            )}
+          >
+            <Scale size={18} />
+            第二階段：廠商報價比對
+          </button>
+        </div>
+
+        {/* 主要內容區塊 */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left Column: Inputs */}
+          {/* 左欄：第一階段 - 輸入採購專案條件 */}
+          {activeTab === 'phase1' && (
           <div className="lg:col-span-4 space-y-6">
             <section className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200">
               <div className="flex items-center justify-between mb-6">
@@ -2298,10 +2600,12 @@ ${JSON.stringify(aligned, null, 2)}
               </div>
             </section>
           </div>
+          )}
 
-          {/* Right Column: Results */}
-          <div className="lg:col-span-5 space-y-8">
-            {/* Stats Grid */}
+          {/* 右欄：第一階段 - AI 初步成本分析結果 & 第二階段 - 廠商報價比對 */}
+          <div className={cn('space-y-8', activeTab === 'phase1' ? 'lg:col-span-8' : 'lg:col-span-9')}>
+            {/* Stats Grid - 只在第一階段顯示 */}
+            {activeTab === 'phase1' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -2328,9 +2632,10 @@ ${JSON.stringify(aligned, null, 2)}
                 <p className="text-3xl font-black text-blue-600">${aiEstimatedPrice !== null ? (aiEstimatedPrice * (Number(totalQty) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}</p>
               </motion.div>
             </div>
+            )}
 
-            {/* AI Cost Breakdown Section */}
-            {aiEstimatedPrice !== null && (
+            {/* AI Cost Breakdown Section - 只在第一階段顯示 */}
+            {activeTab === 'phase1' && aiEstimatedPrice !== null && (
               <section className="bg-white p-8 rounded-3xl shadow-xl border border-slate-200">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3 text-amber-600 flex-wrap">
@@ -2437,8 +2742,37 @@ ${JSON.stringify(aligned, null, 2)}
               </section>
             )}
 
-            {/* Phase 2: 廠商 PDF 報價單解析與比對談判引擎 */}
-            {aiEstimatedPrice !== null && costBreakdown.length > 0 && (
+            {/* Phase 2: 廠商 PDF 報價單解析與比對談判引擎 - 只在第二階段顯示 */}
+            {activeTab === 'phase2' && (
+              <>
+                {/* 第一階段 AI 分析結果參考 - 在第二階段頂部顯示 */}
+                {aiEstimatedPrice !== null && costBreakdown.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6 bg-blue-50/80 rounded-2xl border border-blue-200/60">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-blue-100 rounded-xl">
+                        <TrendingDown className="w-6 h-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-blue-600 font-bold uppercase tracking-wider">AI 估算單價參考</p>
+                        <p className="text-xl font-black text-blue-900">${aiEstimatedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-green-100 rounded-xl">
+                        <DollarSign className="w-6 h-6 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-green-600 font-bold uppercase tracking-wider">AI 估算總價參考</p>
+                        <p className="text-xl font-black text-green-900">${(aiEstimatedPrice * (Number(totalQty) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Phase 2: 廠商 PDF 報價單解析與比對談判引擎 - 只在第二階段顯示 */}
+            {activeTab === 'phase2' && aiEstimatedPrice !== null && costBreakdown.length > 0 && (
               <section className="bg-gradient-to-br from-slate-50 to-violet-50/80 p-8 rounded-3xl shadow-xl border border-violet-200/60">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                   <div className="flex items-center gap-3 text-violet-800">
@@ -2537,14 +2871,15 @@ ${JSON.stringify(aligned, null, 2)}
                       <h4 className="text-lg font-black">差異分析比較表</h4>
                     </div>
                     <div className="overflow-x-auto rounded-2xl border border-violet-100 bg-white shadow-inner mb-8">
-                      <table className="w-full text-left text-sm min-w-[720px]">
+                      <table className="w-full text-left text-sm min-w-[900px]">
                         <thead>
                           <tr className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white">
                             <th className="p-4 font-bold rounded-tl-2xl">成本細項</th>
                             <th className="p-4 font-bold">廠商報價</th>
                             <th className="p-4 font-bold">AI 合理預估</th>
                             <th className="p-4 font-bold">差異金額</th>
-                            <th className="p-4 font-bold rounded-tr-2xl">差異百分比</th>
+                            <th className="p-4 font-bold">差異百分比</th>
+                            <th className="p-4 font-bold rounded-tr-2xl">議價操作</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -2553,68 +2888,143 @@ ${JSON.stringify(aligned, null, 2)}
                               row.aiEstimate > 0
                                 ? row.vendorQuote > row.aiEstimate * 1.1
                                 : row.vendorQuote > 0;
+                            const negotiationRecord = phase2.negotiationRecords?.find(r => r.item === row.item);
+                            const isExpanded = expandedNegotiationItems?.includes(row.item);
+
                             return (
-                              <tr
-                                key={`${row.item}-${idx}`}
-                                className={cn(
-                                  'transition-colors',
-                                  vendorHighVersusAi
-                                    ? 'bg-red-50/90 hover:bg-red-50'
-                                    : 'hover:bg-slate-50/80'
+                              <React.Fragment key={`${row.item}-${idx}`}>
+                                <tr
+                                  className={cn(
+                                    'transition-colors',
+                                    vendorHighVersusAi
+                                      ? 'bg-red-50/90 hover:bg-red-50'
+                                      : 'hover:bg-slate-50/80'
+                                  )}
+                                >
+                                  <td
+                                    className={cn(
+                                      'p-4 font-bold',
+                                      vendorHighVersusAi ? 'text-red-900' : 'text-slate-800'
+                                    )}
+                                  >
+                                    {row.item}
+                                  </td>
+                                  <td
+                                    className={cn(
+                                      'p-4 font-mono font-semibold',
+                                      vendorHighVersusAi ? 'text-red-700' : 'text-slate-700'
+                                    )}
+                                  >
+                                    $
+                                    {row.vendorQuote.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </td>
+                                  <td
+                                    className="p-4 cursor-pointer"
+                                    onDoubleClick={() => setSelectedAiDetailRow(row)}
+                                    title="雙擊查看 AI 合理預估的估算邏輯與成本拆解分析"
+                                  >
+                                    <div className="font-mono text-emerald-700 font-medium">
+                                      $
+                                      {row.aiEstimate.toLocaleString(undefined, {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </div>
+                                    <div className="text-[11px] text-slate-400 mt-1 italic">
+                                      雙擊查看估算邏輯
+                                    </div>
+                                  </td>
+                                  <td
+                                    className={cn(
+                                      'p-4 font-mono font-bold',
+                                      row.varianceAmount > 0
+                                        ? 'text-red-600'
+                                        : row.varianceAmount < 0
+                                          ? 'text-emerald-600'
+                                          : 'text-slate-600'
+                                    )}
+                                  >
+                                    {row.varianceAmount > 0 ? '+' : ''}
+                                    $
+                                    {row.varianceAmount.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </td>
+                                  <td className="p-4 font-mono text-slate-700">
+                                    {row.variancePercent !== null
+                                      ? `${row.variancePercent > 0 ? '+' : ''}${row.variancePercent.toFixed(1)}%`
+                                      : '—'}
+                                  </td>
+                                  <td className="p-4">
+                                    <button
+                                      onClick={() => toggleNegotiationForm(row.item)}
+                                      className={cn(
+                                        'px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1',
+                                        isExpanded
+                                          ? 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                      )}
+                                    >
+                                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                      {negotiationRecord ? '編輯議價' : '開始議價'}
+                                    </button>
+                                  </td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr className="bg-violet-50/30">
+                                    <td colSpan={6} className="p-4">
+                                      <NegotiationForm
+                                        item={row.item}
+                                        currentRecord={negotiationRecord}
+                                        onSave={(record) => saveNegotiationRecord(record)}
+                                        onCancel={() => toggleNegotiationForm(row.item)}
+                                      />
+                                    </td>
+                                  </tr>
                                 )}
-                              >
-                                <td
-                                  className={cn(
-                                    'p-4 font-bold',
-                                    vendorHighVersusAi ? 'text-red-900' : 'text-slate-800'
-                                  )}
-                                >
-                                  {row.item}
-                                </td>
-                                <td
-                                  className={cn(
-                                    'p-4 font-mono font-semibold',
-                                    vendorHighVersusAi ? 'text-red-700' : 'text-slate-700'
-                                  )}
-                                >
-                                  $
-                                  {row.vendorQuote.toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </td>
-                                <td className="p-4 font-mono text-emerald-700 font-medium">
-                                  $
-                                  {row.aiEstimate.toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </td>
-                                <td
-                                  className={cn(
-                                    'p-4 font-mono font-bold',
-                                    row.varianceAmount > 0
-                                      ? 'text-red-600'
-                                      : row.varianceAmount < 0
-                                        ? 'text-emerald-600'
-                                        : 'text-slate-600'
-                                  )}
-                                >
-                                  {row.varianceAmount > 0 ? '+' : ''}
-                                  $
-                                  {row.varianceAmount.toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </td>
-                                <td className="p-4 font-mono text-slate-700">
-                                  {row.variancePercent !== null
-                                    ? `${row.variancePercent > 0 ? '+' : ''}${row.variancePercent.toFixed(1)}%`
-                                    : '—'}
-                                </td>
-                              </tr>
+                              </React.Fragment>
                             );
                           })}
+                          {/* 總計列 */}
+                          <tr className="bg-gradient-to-r from-slate-700 to-slate-800 text-white font-black text-base border-t-2 border-slate-600">
+                            <td className="p-4 rounded-bl-2xl">總計</td>
+                            <td className="p-4 font-mono">
+                              $
+                              {phase2.alignedRows.reduce((sum, row) => sum + row.vendorQuote, 0).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+                            <td className="p-4 font-mono">
+                              $
+                              {phase2.alignedRows.reduce((sum, row) => sum + row.aiEstimate, 0).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+                            <td className={cn(
+                              'p-4 font-mono',
+                              phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0) > 0
+                                ? 'text-red-300'
+                                : phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0) < 0
+                                  ? 'text-emerald-300'
+                                  : 'text-slate-300'
+                            )}>
+                              {phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0) > 0 ? '+' : ''}
+                              $
+                              {phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+                            <td colSpan={2} className="p-4 rounded-br-2xl text-slate-300">
+                              廠商 vs AI 總差異
+                            </td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>
@@ -2624,11 +3034,135 @@ ${JSON.stringify(aligned, null, 2)}
                   </>
                 )}
 
+                {selectedAiDetailRow && (
+                  <div className="mb-6 bg-slate-50 border border-indigo-200 rounded-3xl p-6 shadow-sm">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div>
+                        <h4 className="text-xl font-black text-slate-900">AI 估算邏輯與成本拆解分析</h4>
+                        <p className="text-sm text-slate-500 mt-1">已展開{selectedAiDetailRow.item}的 AI 估算明細，閱讀完畢後可按右上角關閉。</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedAiDetailRow(null)}
+                        className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors"
+                      >
+                        關閉
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">成本細項</p>
+                        <p className="mt-2 text-base font-bold text-slate-900">{selectedAiDetailRow.item}</p>
+                        <p className="mt-1 text-sm text-slate-600">廠商報價：<span className="font-mono text-slate-900">${selectedAiDetailRow.vendorQuote.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></p>
+                        <p className="mt-1 text-sm text-slate-600">AI 合理估算：<span className="font-mono text-emerald-700">${selectedAiDetailRow.aiEstimate.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></p>
+                        <p className="mt-3 text-sm text-slate-500">差異金額：<span className="font-mono text-slate-800">{selectedAiDetailRow.varianceAmount > 0 ? '+' : ''}${selectedAiDetailRow.varianceAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></p>
+                        <p className="mt-1 text-sm text-slate-500">差異比例：<span className="font-mono text-slate-800">{selectedAiDetailRow.variancePercent !== null ? `${selectedAiDetailRow.variancePercent > 0 ? '+' : ''}${selectedAiDetailRow.variancePercent.toFixed(1)}%` : '—'}</span></p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">AI 預估計算邏輯</p>
+                        <p className="mt-3 text-sm leading-relaxed text-slate-700 whitespace-pre-line">{selectedAiDetailRow.calculationLogic}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 專屬 AI 助理對話框 */}
+                {phase2 && (
+                  <div className="mb-8 bg-white border border-violet-200 rounded-2xl p-6 shadow-md">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-black text-violet-900 flex items-center gap-2">
+                        <Bot className="w-5 h-5" />
+                        議價專屬 AI 助理
+                      </h4>
+                      <button
+                        onClick={regenerateNegotiationStrategy}
+                        disabled={isPhase2Negotiating}
+                        className="px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl font-bold text-sm hover:from-violet-700 hover:to-indigo-700 transition-all disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {isPhase2Negotiating ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                        產生/更新進階談判策略
+                      </button>
+                    </div>
+
+                    {/* 對話區域 */}
+                    <div className="mb-4 max-h-64 overflow-y-auto border border-slate-200 rounded-xl p-4 bg-slate-50">
+                      {phase2.phase2ChatMessages && phase2.phase2ChatMessages.length > 0 ? (
+                        <div className="space-y-4">
+                          {phase2.phase2ChatMessages.map((msg, idx) => (
+                            <div key={idx} className={cn(
+                              'flex gap-3',
+                              msg.role === 'user' ? 'justify-end' : 'justify-start'
+                            )}>
+                              {msg.role === 'assistant' && (
+                                <div className="w-8 h-8 bg-violet-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                  <Bot size={16} className="text-violet-600" />
+                                </div>
+                              )}
+                              <div className={cn(
+                                'max-w-[80%] p-3 rounded-2xl text-sm',
+                                msg.role === 'user'
+                                  ? 'bg-violet-600 text-white'
+                                  : 'bg-white border border-slate-200 text-slate-800'
+                              )}>
+                                <Markdown remarkPlugins={[remarkGfm]} className="prose prose-sm max-w-none">
+                                  {msg.text}
+                                </Markdown>
+                              </div>
+                              {msg.role === 'user' && (
+                                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center flex-shrink-0">
+                                  <User size={16} className="text-slate-600" />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center text-slate-500 py-8">
+                          <Bot size={48} className="mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">還沒有對話記錄。輸入問題開始與 AI 助理討論議價策略！</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 輸入區域 */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={phase2ChatInput}
+                        onChange={(e) => setPhase2ChatInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handlePhase2ChatMessage()}
+                        placeholder="詢問議價相關問題，例如：「加工費的耗損率通常抓多少才合理？」"
+                        className="flex-1 p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none"
+                        disabled={isPhase2ChatLoading}
+                      />
+                      <button
+                        onClick={handlePhase2ChatMessage}
+                        disabled={!phase2ChatInput.trim() || isPhase2ChatLoading}
+                        className="px-6 py-3 bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center gap-2 font-medium"
+                      >
+                        {isPhase2ChatLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Send size={16} />
+                        )}
+                        發送
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {phase2?.negotiationStrategy && (
                   <div className="rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/50 p-6 shadow-md">
                     <h4 className="text-lg font-black text-amber-900 mb-4 flex items-center gap-2">
                       <Lightbulb className="w-5 h-5" />
-                      智能談判策略
+                      {phase2.negotiationRecords && phase2.negotiationRecords.length > 0
+                        ? '進階談判策略 (已納入議價回饋)'
+                        : '智能談判策略'
+                      }
                     </h4>
                     <div className="prose prose-sm max-w-none prose-headings:text-amber-900 prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-amber-950">
                       <Markdown remarkPlugins={[remarkGfm]}>{phase2.negotiationStrategy}</Markdown>
@@ -2716,8 +3250,8 @@ ${JSON.stringify(aligned, null, 2)}
               </AnimatePresence>
             </section>
 
-            {/* Overall AI Chat Section */}
-            {aiInsights && (
+            {/* Overall AI Chat Section - 只在第一階段顯示 */}
+            {activeTab === 'phase1' && aiInsights && (
               <section className="bg-white p-8 rounded-3xl shadow-xl border border-slate-200 mt-8">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3 text-blue-600">
