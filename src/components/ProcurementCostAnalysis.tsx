@@ -220,8 +220,8 @@ function rowsToVarianceTable(
       item: r.item,
       vendorQuote,
       aiEstimate,
-      calculationLogic: r.calculationLogic,
-      consultantAnalysis: r.consultantAnalysis,
+      calculationLogic: r.calculationLogic || '',
+      consultantAnalysis: r.consultantAnalysis || '',
       varianceAmount,
       variancePercent,
     };
@@ -314,6 +314,8 @@ export default function ProcurementCostAnalysis() {
   const [isPhase2Aligning, setIsPhase2Aligning] = useState(false);
   const [isPhase2Negotiating, setIsPhase2Negotiating] = useState(false);
   const [selectedAnalysisItem, setSelectedAnalysisItem] = useState<Phase2AlignedRow | null>(null);
+  const [isPhase2AnalysisLoading, setIsPhase2AnalysisLoading] = useState(false);
+  const [phase2AnalysisError, setPhase2AnalysisError] = useState<string | null>(null);
 
   // 議價相關狀態
   const [expandedNegotiationItems, setExpandedNegotiationItems] = useState<string[]>([]);
@@ -1362,6 +1364,137 @@ ${phase2.phase2ChatMessages?.map(m => `${m.role === 'user' ? '使用者' : 'AI'}
       });
     } finally {
       setIsPhase2ChatLoading(false);
+    }
+  };
+
+  const generatePhase2AnalysisForItem = async (
+    row: Phase2AlignedRow,
+    currentPhase2: Phase2State
+  ): Promise<{ calculationLogic: string; consultantAnalysis: string; assistantReply: string }> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    const prompt = `
+你是一位資深採購議價顧問。請針對「廠商報價 vs AI 合理預估」差異分析中的單一成本細項，產出可供採購議價的專業分析。
+
+購案：${confirmedItemDescription || itemName}
+有效報價時間區間：${quoteTimeframe || '未指定'}
+
+目標細項：
+${JSON.stringify(row, null, 2)}
+
+第一階段 AI 成本分項（供你推導估算邏輯，必要時可用）：
+${JSON.stringify({ aiEstimatedUnitPrice: aiEstimatedPrice, totalQty, costBreakdown }, null, 2)}
+
+第二階段其他差異分析列（供你對照比例與合理性）：
+${JSON.stringify(currentPhase2.alignedRows, null, 2)}
+
+該細項的議價回饋紀錄（若有）：
+${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item === row.item), null, 2)}
+
+輸出要求：
+1. calculationLogic：請輸出「包含實際數字」的數學算式與邏輯（可以合理假設單價、工時、耗損率，但要寫明假設依據），讓採購能一眼看懂你怎麼算出 AI 基準價。
+2. consultantAnalysis：請以採購顧問的角度，針對該成本細項提供一段包含「市場行情洞察」與「具體議價切入點」的建議文字，務必具體、可落地（可用條列）。
+3. 請嚴格以 JSON 回覆，不要包含其他文字。
+`;
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_PHASE2_TEXT_MODEL,
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            calculationLogic: { type: Type.STRING },
+            consultantAnalysis: { type: Type.STRING },
+          },
+          required: ['calculationLogic', 'consultantAnalysis'],
+        },
+      },
+    });
+
+    const data = JSON.parse(response.text || '{}') as { calculationLogic?: unknown; consultantAnalysis?: unknown };
+    const calculationLogic = String(data.calculationLogic ?? '').trim();
+    const consultantAnalysis = String(data.consultantAnalysis ?? '').trim();
+    const assistantReply = [
+      `### 【${row.item}】AI 基準價：$${row.aiEstimate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      ``,
+      `**估算邏輯**`,
+      calculationLogic || '（未取得估算邏輯）',
+      ``,
+      `**市場洞察與顧問建議**`,
+      consultantAnalysis || '（未取得市場洞察與顧問建議）',
+    ].join('\n');
+
+    return { calculationLogic, consultantAnalysis, assistantReply };
+  };
+
+  const handleSelectPhase2AnalysisItem = async (row: Phase2AlignedRow) => {
+    setSelectedAnalysisItem(row);
+    setPhase2AnalysisError(null);
+    if (!phase2) return;
+
+    const needsGenerate =
+      !row.calculationLogic?.trim() ||
+      !row.consultantAnalysis?.trim();
+    if (!needsGenerate) return;
+
+    setIsPhase2AnalysisLoading(true);
+    try {
+      const result = await generatePhase2AnalysisForItem(row, phase2);
+
+      setPhase2(prev => {
+        if (!prev) return prev;
+        const alignedRows = prev.alignedRows.map(r => {
+          if (r.item !== row.item) return r;
+          return {
+            ...r,
+            calculationLogic: result.calculationLogic || r.calculationLogic || '',
+            consultantAnalysis: result.consultantAnalysis || r.consultantAnalysis || '',
+          };
+        });
+
+        const newMessages: Phase2State['phase2ChatMessages'] = [
+          ...(prev.phase2ChatMessages || []),
+          { role: 'user' as const, text: `請以採購議價顧問角度，針對「${row.item}」產出估算邏輯與市場洞察與議價切入點。` },
+          { role: 'assistant' as const, text: result.assistantReply },
+        ];
+
+        const updatedPhase2 = { ...prev, alignedRows, phase2ChatMessages: newMessages };
+        saveCurrentProject(undefined, { phase2: updatedPhase2 });
+        return updatedPhase2;
+      });
+
+      setSelectedAnalysisItem(prev => {
+        if (!prev || prev.item !== row.item) return prev;
+        return {
+          ...prev,
+          calculationLogic: result.calculationLogic || prev.calculationLogic || '',
+          consultantAnalysis: result.consultantAnalysis || prev.consultantAnalysis || '',
+        };
+      });
+    } catch (error: unknown) {
+      console.error('Phase2 analysis generate error:', error);
+      const message = error instanceof Error ? error.message : '';
+      let errorMessage = '分析產生失敗，請稍後重試。';
+      if (message.includes('429') || message.includes('quota') || message.includes('RESOURCE_EXHAUSTED')) {
+        errorMessage = 'API 請求次數已達上限 (Quota Exceeded)。請稍後再試，或檢查您的 API Key 額度。';
+      }
+      setPhase2AnalysisError(errorMessage);
+
+      setPhase2(prev => {
+        if (!prev) return prev;
+        const newMessages: Phase2State['phase2ChatMessages'] = [
+          ...(prev.phase2ChatMessages || []),
+          { role: 'user' as const, text: `請以採購議價顧問角度，針對「${row.item}」產出估算邏輯與市場洞察與議價切入點。` },
+          { role: 'assistant' as const, text: errorMessage },
+        ];
+        const updatedPhase2 = { ...prev, phase2ChatMessages: newMessages };
+        saveCurrentProject(undefined, { phase2: updatedPhase2 });
+        return updatedPhase2;
+      });
+    } finally {
+      setIsPhase2AnalysisLoading(false);
     }
   };
 
@@ -2921,7 +3054,8 @@ ${phase2.phase2ChatMessages?.map(m => `${m.role === 'user' ? '使用者' : 'AI'}
                                   <td className="p-4">
                                     <button
                                       type="button"
-                                      onClick={() => setSelectedAnalysisItem(row)}
+                                      onClick={() => handleSelectPhase2AnalysisItem(row)}
+                                      disabled={isPhase2AnalysisLoading}
                                       className={cn(
                                         'text-left rounded-lg transition-colors cursor-pointer',
                                         selectedAnalysisItem?.item === row.item
@@ -3376,8 +3510,19 @@ ${phase2.phase2ChatMessages?.map(m => `${m.role === 'user' ? '使用者' : 'AI'}
                     <Lightbulb className="w-5 h-5 shrink-0 text-violet-700 mt-0.5" />
                     <span>請點擊左側表格的「AI 合理預估」金額，查看詳細成本分析。</span>
                   </div>
+                ) : isPhase2AnalysisLoading ? (
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 text-slate-700 text-sm font-medium flex gap-2 items-center">
+                    <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
+                    <span>議價專屬 AI 助理正在產生分析…</span>
+                  </div>
                 ) : (
                   <div className="space-y-4">
+                    {phase2AnalysisError && (
+                      <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex gap-2 items-start">
+                        <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                        <span>{phase2AnalysisError}</span>
+                      </div>
+                    )}
                     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">項目名稱與金額</p>
                       <p className="mt-2 text-base font-black text-slate-900">【{selectedAnalysisItem.item}】 AI 基準價：<span className="font-mono text-emerald-700">${selectedAnalysisItem.aiEstimate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
