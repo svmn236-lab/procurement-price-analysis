@@ -168,9 +168,9 @@ const INITIAL_VENDORS: Vendor[] = [
 
 /**
  * PDF 視覺萃取（多模態）。使用 `-latest` 別名以利 v1beta 正確解析。
- * `ai.models.generateContent` 的 model 須為純字串（例如 gemini-1.5-pro-latest），不可加 models/ 前綴。
+ * `ai.models.generateContent` 的 model 須為純字串（例如 gemini-3-flash-preview），不可加 models/ 前綴。
  */
-const GEMINI_PDF_VISION_MODEL = 'gemini-1.5-pro-latest';
+const GEMINI_PDF_VISION_MODEL = 'gemini-3-flash-preview';
 /** 結構對齊與談判策略（與第一階段一致） */
 const GEMINI_PHASE2_TEXT_MODEL = 'gemini-3-flash-preview';
 
