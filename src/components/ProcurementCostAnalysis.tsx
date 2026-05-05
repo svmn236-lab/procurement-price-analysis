@@ -31,7 +31,9 @@ import {
   FolderOpen,
   Download,
   Lightbulb,
-  Building2
+  Building2,
+  FileSearch,
+  Scale
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -76,6 +78,28 @@ interface RecommendedVendor {
   reason: string;
 }
 
+/** 廠商 PDF 報價單萃取單列 */
+interface VendorPdfLineItem {
+  item: string;
+  amount: number;
+}
+
+/** 第二階段：對齊後之差異分析列 */
+interface Phase2AlignedRow {
+  item: string;
+  vendorQuote: number;
+  aiEstimate: number;
+  varianceAmount: number;
+  variancePercent: number | null;
+}
+
+interface Phase2State {
+  vendorPdfFileName: string | null;
+  vendorPdfParsedLines: VendorPdfLineItem[];
+  alignedRows: Phase2AlignedRow[];
+  negotiationStrategy: string;
+}
+
 interface SavedProject {
   id: string;
   timestamp: number;
@@ -102,6 +126,8 @@ interface SavedProject {
   overallChatMessages: { role: 'user' | 'model', text: string }[];
   alternatives?: AlternativeProduct[];
   recommendedVendors?: RecommendedVendor[];
+  /** 第二階段：PDF 解析、結構對齊、談判策略 */
+  phase2?: Phase2State;
 }
 
 interface HistoryExcelRow {
@@ -133,11 +159,72 @@ interface HistoryExcelRow {
   承辦科: string;
   承辦人: string;
   規格已確認: boolean;
+  第二階段JSON: string;
 }
 
 const INITIAL_VENDORS: Vendor[] = [
   { id: '1', name: '', price: 0 },
 ];
+
+/**
+ * PDF 視覺萃取（多模態）。使用 `-latest` 別名以利 v1beta 正確解析。
+ * `ai.models.generateContent` 的 model 須為純字串（例如 gemini-1.5-pro-latest），不可加 models/ 前綴。
+ */
+const GEMINI_PDF_VISION_MODEL = 'gemini-1.5-pro-latest';
+/** 結構對齊與談判策略（與第一階段一致） */
+const GEMINI_PHASE2_TEXT_MODEL = 'gemini-3-flash-preview';
+
+function extractJsonArrayFromText(text: string): VendorPdfLineItem[] {
+  const raw = text.trim();
+  const start = raw.indexOf('[');
+  const end = raw.lastIndexOf(']');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('模型未回傳有效的 JSON 陣列');
+  }
+  const parsed = JSON.parse(raw.slice(start, end + 1));
+  if (!Array.isArray(parsed)) throw new Error('解析結果不是陣列');
+  return parsed.map((row: unknown) => {
+    if (!row || typeof row !== 'object') return { item: '不明項目', amount: 0 };
+    const o = row as Record<string, unknown>;
+    const item = String(o.item ?? o.name ?? '未命名');
+    const amount = Number(o.amount ?? o.price ?? 0);
+    return { item, amount: Number.isFinite(amount) ? amount : 0 };
+  });
+}
+
+function rowsToVarianceTable(
+  rows: { item: string; vendorQuote: number; aiReasonableEstimate: number }[]
+): Phase2AlignedRow[] {
+  return rows.map((r) => {
+    const vendorQuote = r.vendorQuote;
+    const aiEstimate = r.aiReasonableEstimate;
+    const varianceAmount = vendorQuote - aiEstimate;
+    const variancePercent =
+      aiEstimate !== 0 && Number.isFinite(aiEstimate)
+        ? (varianceAmount / Math.abs(aiEstimate)) * 100
+        : null;
+    return {
+      item: r.item,
+      vendorQuote,
+      aiEstimate,
+      varianceAmount,
+      variancePercent,
+    };
+  });
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = reader.result as string;
+      const b64 = s.includes(',') ? s.split(',')[1]! : s;
+      resolve(b64);
+    };
+    reader.onerror = () => reject(new Error('讀取檔案失敗'));
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function ProcurementCostAnalysis() {
   const [itemName, setItemName] = useState('');
@@ -214,6 +301,14 @@ export default function ProcurementCostAnalysis() {
   const [recommendedVendors, setRecommendedVendors] = useState<RecommendedVendor[]>([]);
   const [showRecommendedVendorsModal, setShowRecommendedVendorsModal] = useState(false);
   const [isFetchingRecommendedVendors, setIsFetchingRecommendedVendors] = useState(false);
+
+  /** 第二階段：廠商 PDF 報價解析、對齊比對、談判策略 */
+  const [phase2, setPhase2] = useState<Phase2State | null>(null);
+  const [phase2Error, setPhase2Error] = useState<string | null>(null);
+  const [isPhase2Parsing, setIsPhase2Parsing] = useState(false);
+  const [isPhase2Aligning, setIsPhase2Aligning] = useState(false);
+  const [isPhase2Negotiating, setIsPhase2Negotiating] = useState(false);
+  const vendorPdfInputRef = React.useRef<HTMLInputElement>(null);
 
   const appRef = React.useRef<HTMLDivElement>(null);
   const confirmedItemRef = React.useRef<HTMLDivElement>(null);
@@ -305,6 +400,11 @@ export default function ProcurementCostAnalysis() {
     setCurrentProjectId(null);
     setAlternatives([]);
     setRecommendedVendors([]);
+    setPhase2(null);
+    setPhase2Error(null);
+    setIsPhase2Parsing(false);
+    setIsPhase2Aligning(false);
+    setIsPhase2Negotiating(false);
   };
 
   const buildProjectSnapshot = (projectId: string, desc?: string, overrides?: Partial<SavedProject>): SavedProject => ({
@@ -333,6 +433,7 @@ export default function ProcurementCostAnalysis() {
     overallChatMessages,
     alternatives,
     recommendedVendors,
+    phase2: phase2 ?? undefined,
     ...overrides
   });
 
@@ -377,6 +478,8 @@ export default function ProcurementCostAnalysis() {
     setOverallChatMessages(project.overallChatMessages);
     setAlternatives(project.alternatives || []);
     setRecommendedVendors(project.recommendedVendors || []);
+    setPhase2(project.phase2 ?? null);
+    setPhase2Error(null);
     setShowSavedProjectsModal(false);
     setCurrentProjectId(project.id);
   };
@@ -401,7 +504,7 @@ export default function ProcurementCostAnalysis() {
           .join(' | ') || '無';
 
       return {
-        匯出版本: 'xlsx-v1',
+        匯出版本: 'xlsx-v2',
         匯出時間: new Date().toISOString(),
         專案ID: project.id,
         日期: new Date(project.timestamp).toISOString(),
@@ -429,6 +532,7 @@ export default function ProcurementCostAnalysis() {
         承辦科: project.handlingSection || '',
         承辦人: project.handler || '',
         規格已確認: project.isSpecsConfirmed,
+        第二階段JSON: JSON.stringify(project.phase2 ?? null),
       };
     });
 
@@ -464,6 +568,19 @@ export default function ProcurementCostAnalysis() {
     const overallChatMessagesImported = parseJsonCell<{ role: 'user' | 'model', text: string }[]>(raw['整體對話JSON'], []);
     const alternativesImported = parseJsonCell<AlternativeProduct[]>(raw['替代方案JSON'], []);
     const recommendedVendorsImported = parseJsonCell<RecommendedVendor[]>(raw['推薦廠商JSON'], []);
+    const phase2Raw = raw['第二階段JSON'];
+    let phase2Imported: Phase2State | undefined;
+    if (typeof phase2Raw === 'string' && phase2Raw.trim() && phase2Raw !== 'null') {
+      const parsed = parseJsonCell<Phase2State | null>(phase2Raw, null);
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.vendorPdfParsedLines) && Array.isArray(parsed.alignedRows)) {
+        phase2Imported = {
+          vendorPdfFileName: parsed.vendorPdfFileName ?? null,
+          vendorPdfParsedLines: parsed.vendorPdfParsedLines,
+          alignedRows: parsed.alignedRows,
+          negotiationStrategy: typeof parsed.negotiationStrategy === 'string' ? parsed.negotiationStrategy : '',
+        };
+      }
+    }
 
     if (!Array.isArray(vendors) || !Array.isArray(costBreakdownImported)) return null;
 
@@ -499,6 +616,7 @@ export default function ProcurementCostAnalysis() {
       overallChatMessages: Array.isArray(overallChatMessagesImported) ? overallChatMessagesImported : [],
       alternatives: Array.isArray(alternativesImported) ? alternativesImported : [],
       recommendedVendors: Array.isArray(recommendedVendorsImported) ? recommendedVendorsImported : [],
+      phase2: phase2Imported,
     };
   };
 
@@ -991,6 +1109,176 @@ export default function ProcurementCostAnalysis() {
     }
   };
 
+  /** 步驟一：Gemini 視覺萃取 PDF 報價細項 */
+  const parseVendorQuotePdfWithGemini = async (base64Pdf: string): Promise<VendorPdfLineItem[]> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    const response = await ai.models.generateContent({
+      model: GEMINI_PDF_VISION_MODEL,
+      contents: [
+        { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
+        { text: '請閱讀附件 PDF 並依系統角色指示輸出，不要輸出任何額外說明文字。' },
+      ],
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: `你是一個專業的採購稽核員。請閱讀這份 PDF 報價單，提取出所有的【成本細項】與對應的【報價金額】。請直接輸出純 JSON 陣列格式，不要包含其他文字，格式範例：[{"item": "加工費", "amount": 1500}, {"item": "原物料", "amount": 3000}]`,
+      },
+    });
+    const text = response.text || '';
+    return extractJsonArrayFromText(text);
+  };
+
+  /** 步驟二：將第一階段模擬成本依廠商項目分類重新拆解配對 */
+  const alignCostStructures = async (
+    vendorLines: VendorPdfLineItem[]
+  ): Promise<{ item: string; vendorQuote: number; aiReasonableEstimate: number }[]> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    const inputA = JSON.stringify(
+      {
+        aiEstimatedUnitPrice: aiEstimatedPrice,
+        totalQty,
+        itemDescription: confirmedItemDescription || itemName,
+        quoteTimeframe: quoteTimeframe || '未指定',
+        costBreakdown,
+        aiInsights: aiInsights?.slice(0, 6000),
+      },
+      null,
+      2
+    );
+    const inputB = JSON.stringify(vendorLines, null, 2);
+
+    const prompt = `
+你是一位採購成本結構分析專家。請將「輸入 A」的 AI 模擬總成本與分項邏輯，強制依照「輸入 B」的廠商報價項目分類進行重新拆解與配對。
+
+輸入 A（第一階段 AI 模擬總成本與分析）：
+${inputA}
+
+輸入 B（廠商報價單成本細項與金額）：
+${inputB}
+
+任務：
+1. 對輸入 B 的每一個成本細項輸出一列。
+2. item 必須與輸入 B 該列的 item 文字完全一致。
+3. vendorQuote 必須等於輸入 B 對應項目的 amount（數值）。
+4. aiReasonableEstimate 為依輸入 A 整體合理預估，配對到該廠商分類後的 AI 合理金額（可為小數，最終四捨五入至合理精度）。
+
+請嚴格以 JSON 格式回覆，不要包含其他文字。
+`;
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_PHASE2_TEXT_MODEL,
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            rows: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  item: { type: Type.STRING },
+                  vendorQuote: { type: Type.NUMBER },
+                  aiReasonableEstimate: { type: Type.NUMBER },
+                },
+                required: ['item', 'vendorQuote', 'aiReasonableEstimate'],
+              },
+            },
+          },
+          required: ['rows'],
+        },
+      },
+    });
+
+    const data = JSON.parse(response.text || '{}');
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    return rows as { item: string; vendorQuote: number; aiReasonableEstimate: number }[];
+  };
+
+  /** 步驟三：依差異分析產出談判策略 */
+  const generatePhase2NegotiationStrategy = async (
+    aligned: Phase2AlignedRow[]
+  ): Promise<string> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    const prompt = `
+你是一位資深採購談判顧問。以下為購案「${confirmedItemDescription || itemName}」第二階段「廠商 PDF 報價 vs AI 合理預估」的差異分析（JSON）：
+${JSON.stringify(aligned, null, 2)}
+
+請以繁體中文、Markdown 格式撰寫「針對性談判策略」，必須具體包含：
+1. **灌水最嚴重的細項**：指出廠商在哪個成本細項利潤偏高或灌水最嚴重（附數字依據）。
+2. **攻防話術建議**：針對異常項目給出可直接使用的殺價說法（條列）。
+3. **風險與隱藏成本**：提醒可能遺漏的費用、規格陷阱或合約風險。
+
+語氣專業、可直接對內部簡報使用。`;
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_PHASE2_TEXT_MODEL,
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      },
+    });
+    return (response.text || '').trim() || '（未能產生談判策略，請稍後重試）';
+  };
+
+  const handleVendorQuotePdfSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const isPdf =
+      file.type === 'application/pdf' ||
+      file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setPhase2Error('僅接受 .pdf 格式的廠商報價單。');
+      return;
+    }
+    if (aiEstimatedPrice === null || costBreakdown.length === 0) {
+      setPhase2Error('請先完成第一階段「AI 模擬報價」並取得成本分項後，再上傳廠商報價 PDF。');
+      return;
+    }
+
+    setPhase2Error(null);
+    setIsPhase2Parsing(true);
+    setIsPhase2Aligning(false);
+    setIsPhase2Negotiating(false);
+
+    try {
+      const base64 = await fileToBase64(file);
+      const vendorPdfParsedLines = await parseVendorQuotePdfWithGemini(base64);
+
+      setIsPhase2Parsing(false);
+      setIsPhase2Aligning(true);
+
+      const alignRows = await alignCostStructures(vendorPdfParsedLines);
+      const alignedRows = rowsToVarianceTable(alignRows);
+
+      setIsPhase2Aligning(false);
+      setIsPhase2Negotiating(true);
+
+      const negotiationStrategy = await generatePhase2NegotiationStrategy(alignedRows);
+
+      const nextPhase2: Phase2State = {
+        vendorPdfFileName: file.name,
+        vendorPdfParsedLines,
+        alignedRows,
+        negotiationStrategy,
+      };
+      setPhase2(nextPhase2);
+      saveCurrentProject(undefined, { phase2: nextPhase2 });
+    } catch (err: unknown) {
+      console.error('Phase 2 PDF pipeline error:', err);
+      const msg =
+        err instanceof Error ? err.message : '第二階段分析失敗，請確認 PDF 可讀且 API 可用。';
+      setPhase2Error(msg);
+    } finally {
+      setIsPhase2Parsing(false);
+      setIsPhase2Aligning(false);
+      setIsPhase2Negotiating(false);
+    }
+  };
+
   // --- 優化點 1: 強制 JSON 輸出與結構校準 ---
   const runAiAnalysis = async () => {
     setIsAnalyzing(true);
@@ -1063,6 +1351,8 @@ export default function ProcurementCostAnalysis() {
       setAiInsights(data.insights || "無分析建議");
       setAiEstimatedPrice(data.estimatedPrice || stats.minPrice * 0.95); // 若沒產出，預設最低標打95折
       setCostBreakdown(data.breakdown || []);
+      setPhase2(null);
+      setPhase2Error(null);
 
       // Save to history
       const newEntry: CostHistoryEntry = {
@@ -1081,7 +1371,8 @@ export default function ProcurementCostAnalysis() {
           aiInsights: data.insights || "無分析建議",
           aiEstimatedPrice: data.estimatedPrice || stats.minPrice * 0.95,
           costBreakdown: data.breakdown || [],
-          costHistory: newHistory
+          costHistory: newHistory,
+          phase2: undefined,
         });
         
         return newHistory;
@@ -2143,6 +2434,207 @@ export default function ProcurementCostAnalysis() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </section>
+            )}
+
+            {/* Phase 2: 廠商 PDF 報價單解析與比對談判引擎 */}
+            {aiEstimatedPrice !== null && costBreakdown.length > 0 && (
+              <section className="bg-gradient-to-br from-slate-50 to-violet-50/80 p-8 rounded-3xl shadow-xl border border-violet-200/60">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                  <div className="flex items-center gap-3 text-violet-800">
+                    <div className="p-2.5 bg-violet-100 rounded-xl border border-violet-200">
+                      <Scale className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-slate-800 tracking-tight">
+                        第二階段：廠商 PDF 報價單解析與比對談判
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        上傳廠商報價 PDF → Gemini 視覺萃取 → 結構對齊 → 差異表與談判策略
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={vendorPdfInputRef}
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      className="hidden"
+                      onChange={handleVendorQuotePdfSelected}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => vendorPdfInputRef.current?.click()}
+                      disabled={
+                        isPhase2Parsing || isPhase2Aligning || isPhase2Negotiating
+                      }
+                      className={cn(
+                        'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold shadow-md transition-all',
+                        isPhase2Parsing || isPhase2Aligning || isPhase2Negotiating
+                          ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                          : 'bg-violet-600 text-white hover:bg-violet-700 hover:shadow-lg'
+                      )}
+                    >
+                      {(isPhase2Parsing || isPhase2Aligning || isPhase2Negotiating) ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Upload className="w-4 h-4" />
+                      )}
+                      上傳廠商報價單（PDF）
+                    </button>
+                  </div>
+                </div>
+
+                {(isPhase2Parsing || isPhase2Aligning || isPhase2Negotiating) && (
+                  <div className="mb-4 flex flex-wrap gap-3 text-xs font-semibold text-violet-900">
+                    {isPhase2Parsing && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-violet-200 shadow-sm">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        解析 PDF（Gemini 視覺萃取）…
+                      </span>
+                    )}
+                    {isPhase2Aligning && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-violet-200 shadow-sm">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        AI 結構對齊（Apples-to-Apples）…
+                      </span>
+                    )}
+                    {isPhase2Negotiating && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-violet-200 shadow-sm">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        生成談判策略…
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {phase2Error && (
+                  <div className="mb-4 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex gap-2 items-start">
+                    <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                    <span>{phase2Error}</span>
+                  </div>
+                )}
+
+                {phase2?.vendorPdfFileName && (
+                  <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                    <FileSearch className="w-4 h-4 text-violet-600" />
+                    <span className="font-bold text-slate-700">已解析檔案：</span>
+                    <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
+                      {phase2.vendorPdfFileName}
+                    </span>
+                    {phase2.vendorPdfParsedLines.length > 0 && (
+                      <span className="text-xs text-slate-500">
+                        （萃取 {phase2.vendorPdfParsedLines.length} 筆細項）
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {phase2 && phase2.alignedRows.length > 0 && (
+                  <>
+                    <div className="mb-2 flex items-center gap-2 text-slate-800">
+                      <FileText className="w-5 h-5 text-violet-600" />
+                      <h4 className="text-lg font-black">差異分析比較表</h4>
+                    </div>
+                    <div className="overflow-x-auto rounded-2xl border border-violet-100 bg-white shadow-inner mb-8">
+                      <table className="w-full text-left text-sm min-w-[720px]">
+                        <thead>
+                          <tr className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white">
+                            <th className="p-4 font-bold rounded-tl-2xl">成本細項</th>
+                            <th className="p-4 font-bold">廠商報價</th>
+                            <th className="p-4 font-bold">AI 合理預估</th>
+                            <th className="p-4 font-bold">差異金額</th>
+                            <th className="p-4 font-bold rounded-tr-2xl">差異百分比</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {phase2.alignedRows.map((row, idx) => {
+                            const vendorHighVersusAi =
+                              row.aiEstimate > 0
+                                ? row.vendorQuote > row.aiEstimate * 1.1
+                                : row.vendorQuote > 0;
+                            return (
+                              <tr
+                                key={`${row.item}-${idx}`}
+                                className={cn(
+                                  'transition-colors',
+                                  vendorHighVersusAi
+                                    ? 'bg-red-50/90 hover:bg-red-50'
+                                    : 'hover:bg-slate-50/80'
+                                )}
+                              >
+                                <td
+                                  className={cn(
+                                    'p-4 font-bold',
+                                    vendorHighVersusAi ? 'text-red-900' : 'text-slate-800'
+                                  )}
+                                >
+                                  {row.item}
+                                </td>
+                                <td
+                                  className={cn(
+                                    'p-4 font-mono font-semibold',
+                                    vendorHighVersusAi ? 'text-red-700' : 'text-slate-700'
+                                  )}
+                                >
+                                  $
+                                  {row.vendorQuote.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </td>
+                                <td className="p-4 font-mono text-emerald-700 font-medium">
+                                  $
+                                  {row.aiEstimate.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </td>
+                                <td
+                                  className={cn(
+                                    'p-4 font-mono font-bold',
+                                    row.varianceAmount > 0
+                                      ? 'text-red-600'
+                                      : row.varianceAmount < 0
+                                        ? 'text-emerald-600'
+                                        : 'text-slate-600'
+                                  )}
+                                >
+                                  {row.varianceAmount > 0 ? '+' : ''}
+                                  $
+                                  {row.varianceAmount.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </td>
+                                <td className="p-4 font-mono text-slate-700">
+                                  {row.variancePercent !== null
+                                    ? `${row.variancePercent > 0 ? '+' : ''}${row.variancePercent.toFixed(1)}%`
+                                    : '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mb-8 -mt-4 px-1">
+                      * 當「廠商報價」高於「AI 合理預估」超過 10% 時，該列以紅底標示以利議價聚焦。
+                    </p>
+                  </>
+                )}
+
+                {phase2?.negotiationStrategy && (
+                  <div className="rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/50 p-6 shadow-md">
+                    <h4 className="text-lg font-black text-amber-900 mb-4 flex items-center gap-2">
+                      <Lightbulb className="w-5 h-5" />
+                      智能談判策略
+                    </h4>
+                    <div className="prose prose-sm max-w-none prose-headings:text-amber-900 prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-amber-950">
+                      <Markdown remarkPlugins={[remarkGfm]}>{phase2.negotiationStrategy}</Markdown>
+                    </div>
+                  </div>
+                )}
               </section>
             )}
 
