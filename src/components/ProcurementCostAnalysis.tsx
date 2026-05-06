@@ -55,7 +55,7 @@ import * as XLSX from 'xlsx';
 
 // --- Types (已整合至單一檔案) ---
 interface Vendor { id: string; name: string; price: number; }
-interface CostItem { item: string; cost: number; basis: string; explanation: string; customCondition?: string; isUpdating?: boolean; }
+interface CostItem { category: string; item: string; cost: number; basis: string; explanation: string; customCondition?: string; isUpdating?: boolean; }
 interface ConsolidatedSpec { category: string; content: string; source: string; hasContradiction: boolean; warningMessage?: string; rejectedContent?: string; }
 
 interface CostHistoryEntry {
@@ -95,6 +95,7 @@ interface NegotiationRecord {
 
 /** 第二階段：對齊後之差異分析列 */
 interface Phase2AlignedRow {
+  category: string;
   item: string;
   vendorQuote: number;
   aiEstimate: number;
@@ -111,6 +112,12 @@ interface Phase2State {
   negotiationStrategy: string;
   negotiationRecords: NegotiationRecord[]; // 新增：議價記錄
   phase2ChatMessages: { role: 'user' | 'assistant', text: string }[]; // 新增：專屬對話
+}
+
+interface Phase3State {
+  isMerged: boolean;
+  justifications: Record<string, string>; // key: item name or category name
+  isGeneratingJustification: boolean;
 }
 
 interface SavedProject {
@@ -141,6 +148,8 @@ interface SavedProject {
   recommendedVendors?: RecommendedVendor[];
   /** 第二階段：PDF 解析、結構對齊、談判策略 */
   phase2?: Phase2State;
+  /** 第三階段：主管決策報表 */
+  phase3?: Phase3State;
 }
 
 interface HistoryExcelRow {
@@ -206,7 +215,7 @@ function extractJsonArrayFromText(text: string): VendorPdfLineItem[] {
 }
 
 function rowsToVarianceTable(
-  rows: { item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[]
+  rows: { category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[]
 ): Phase2AlignedRow[] {
   return rows.map((r) => {
     const vendorQuote = r.vendorQuote;
@@ -217,6 +226,7 @@ function rowsToVarianceTable(
         ? (varianceAmount / Math.abs(aiEstimate)) * 100
         : null;
     return {
+      category: r.category || '未分類',
       item: r.item,
       vendorQuote,
       aiEstimate,
@@ -230,7 +240,7 @@ function rowsToVarianceTable(
 
 export default function ProcurementCostAnalysis() {
   // 頁籤狀態管理
-  const [activeTab, setActiveTab] = useState<'phase1' | 'phase2'>('phase1');
+  const [activeTab, setActiveTab] = useState<'phase1' | 'phase2' | 'phase3'>('phase1');
 
   const [itemName, setItemName] = useState('');
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -316,6 +326,13 @@ export default function ProcurementCostAnalysis() {
   const [selectedAnalysisItem, setSelectedAnalysisItem] = useState<Phase2AlignedRow | null>(null);
   const [isPhase2AnalysisLoading, setIsPhase2AnalysisLoading] = useState(false);
   const [phase2AnalysisError, setPhase2AnalysisError] = useState<string | null>(null);
+
+  /** 第三階段：主管決策報表 */
+  const [phase3, setPhase3] = useState<Phase3State>({
+    isMerged: false,
+    justifications: {},
+    isGeneratingJustification: false
+  });
 
   // 議價相關狀態
   const [expandedNegotiationItems, setExpandedNegotiationItems] = useState<string[]>([]);
@@ -448,6 +465,7 @@ export default function ProcurementCostAnalysis() {
     alternatives,
     recommendedVendors,
     phase2: phase2 ?? undefined,
+    phase3: phase3 ?? undefined,
     ...overrides
   });
 
@@ -493,6 +511,7 @@ export default function ProcurementCostAnalysis() {
     setAlternatives(project.alternatives || []);
     setRecommendedVendors(project.recommendedVendors || []);
     setPhase2(project.phase2 ?? null);
+    setPhase3(project.phase3 ?? { isMerged: false, justifications: {}, isGeneratingJustification: false });
     setPhase2Error(null);
     setShowSavedProjectsModal(false);
     setCurrentProjectId(project.id);
@@ -1174,11 +1193,12 @@ ${inputB}
 
 任務：
 1. 對輸入 B 的每一個成本細項輸出一列。
-2. item 必須與輸入 B 該列的 item 文字完全一致。
-3. vendorQuote 必須等於輸入 B 對應項目的 amount（數值）。
-4. aiReasonableEstimate 為依輸入 A 整體合理預估，配對到該廠商分類後的 AI 合理金額（可為小數，最終四捨五入至合理精度）。
-5. calculationLogic 必須詳細說明 AI 預估金額的計算邏輯，例如："原物料 5kg * 單價 100 + 5% 耗損" 或 "人工費 8小時 * 時薪 150 + 10% 管理費"。
-6. consultantAnalysis 請以採購顧問的角度，針對該成本細項提供一段包含「市場行情洞察」與「具體議價切入點」的分析文字（以繁體中文撰寫，避免空泛，要可落地）。
+2. category 必須根據項目性質進行分類（例如：外購件費、加工費、管理費、運費、利潤等）。
+3. item 必須與輸入 B 該列的 item 文字完全一致。
+4. vendorQuote 必須等於輸入 B 對應項目的 amount（數值）。
+5. aiReasonableEstimate 為依輸入 A 整體合理預估，配對到該廠商分類後的 AI 合理金額（可為小數，最終四捨五入至合理精度）。
+6. calculationLogic 必須詳細說明 AI 預估金額的計算邏輯，例如："原物料 5kg * 單價 100 + 5% 耗損" 或 "人工費 8小時 * 時薪 150 + 10% 管理費"。
+7. consultantAnalysis 請以採購顧問的角度，針對該成本細項提供一段包含「市場行情洞察」與「具體議價切入點」的分析文字（以繁體中文撰寫，避免空泛，要可落地）。
 
 請嚴格以 JSON 格式回覆，不要包含其他文字。
 `;
@@ -1197,13 +1217,14 @@ ${inputB}
               items: {
                 type: Type.OBJECT,
                 properties: {
+                  category: { type: Type.STRING },
                   item: { type: Type.STRING },
                   vendorQuote: { type: Type.NUMBER },
                   aiReasonableEstimate: { type: Type.NUMBER },
                   calculationLogic: { type: Type.STRING },
                   consultantAnalysis: { type: Type.STRING },
                 },
-                required: ['item', 'vendorQuote', 'aiReasonableEstimate', 'calculationLogic', 'consultantAnalysis'],
+                required: ['category', 'item', 'vendorQuote', 'aiReasonableEstimate', 'calculationLogic', 'consultantAnalysis'],
               },
             },
           },
@@ -1214,7 +1235,7 @@ ${inputB}
 
     const data = JSON.parse(response.text || '{}');
     const rows = Array.isArray(data.rows) ? data.rows : [];
-    return rows as { item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[];
+    return rows as { category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[];
   };
 
   /** 步驟三：依差異分析產出談判策略 */
@@ -1391,9 +1412,10 @@ ${JSON.stringify(currentPhase2.alignedRows, null, 2)}
 ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item === row.item), null, 2)}
 
 輸出要求：
-1. calculationLogic：請輸出「包含實際數字」的數學算式與邏輯（可以合理假設單價、工時、耗損率，但要寫明假設依據），讓採購能一眼看懂你怎麼算出 AI 基準價。
-2. consultantAnalysis：請以採購顧問的角度，針對該成本細項提供一段包含「市場行情洞察」與「具體議價切入點」的建議文字，務必具體、可落地（可用條列）。
-3. 請嚴格以 JSON 回覆，不要包含其他文字。
+1. category：請根據項目性質進行分類（例如：外購件費、加工費、管理費、運費、利潤等）。
+2. calculationLogic：請輸出「包含實際數字」的數學算式與邏輯（可以合理假設單價、工時、耗損率，但要寫明假設依據），讓採購能一眼看懂你怎麼算出 AI 基準價。
+3. consultantAnalysis：請以採購顧問的角度，針對該成本細項提供一段包含「市場行情洞察」與「具體議價切入點」的建議文字，務必具體、可落地（可用條列）。
+4. 請嚴格以 JSON 回覆，不要包含其他文字。
 `;
 
     const response = await ai.models.generateContent({
@@ -1405,19 +1427,23 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            category: { type: Type.STRING },
             calculationLogic: { type: Type.STRING },
             consultantAnalysis: { type: Type.STRING },
           },
-          required: ['calculationLogic', 'consultantAnalysis'],
+          required: ['category', 'calculationLogic', 'consultantAnalysis'],
         },
       },
     });
 
-    const data = JSON.parse(response.text || '{}') as { calculationLogic?: unknown; consultantAnalysis?: unknown };
+    const data = JSON.parse(response.text || '{}') as { category?: unknown; calculationLogic?: unknown; consultantAnalysis?: unknown };
+    const category = String(data.category ?? row.category ?? '未分類').trim();
     const calculationLogic = String(data.calculationLogic ?? '').trim();
     const consultantAnalysis = String(data.consultantAnalysis ?? '').trim();
     const assistantReply = [
       `### 【${row.item}】AI 基準價：$${row.aiEstimate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      ``,
+      `**所屬分類**: ${category}`,
       ``,
       `**估算邏輯**`,
       calculationLogic || '（未取得估算邏輯）',
@@ -1426,7 +1452,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
       consultantAnalysis || '（未取得市場洞察與顧問建議）',
     ].join('\n');
 
-    return { calculationLogic, consultantAnalysis, assistantReply };
+    return { category, calculationLogic, consultantAnalysis, assistantReply };
   };
 
   const handleSelectPhase2AnalysisItem = async (row: Phase2AlignedRow) => {
@@ -1449,6 +1475,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
           if (r.item !== row.item) return r;
           return {
             ...r,
+            category: result.category || r.category || '未分類',
             calculationLogic: result.calculationLogic || r.calculationLogic || '',
             consultantAnalysis: result.consultantAnalysis || r.consultantAnalysis || '',
           };
@@ -1469,6 +1496,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
         if (!prev || prev.item !== row.item) return prev;
         return {
           ...prev,
+          category: result.category || prev.category || '未分類',
           calculationLogic: result.calculationLogic || prev.calculationLogic || '',
           consultantAnalysis: result.consultantAnalysis || prev.consultantAnalysis || '',
         };
@@ -1519,6 +1547,137 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
     } finally {
       setIsPhase2Negotiating(false);
     }
+  };
+
+  const getCommittedPrice = (item: string, vendorQuote: number, records: NegotiationRecord[] = []) => {
+    const record = records.find(r => r.item === item && r.isAccepted);
+    return record ? record.negotiatedPrice : vendorQuote;
+  };
+
+  /** 步驟四：產出主管決策報表之成本合理性辯護 */
+  const generateCostJustification = async (
+    targetItems: { category: string; item: string; vendorQuote: number; finalPrice: number }[],
+    isMergedMode: boolean
+  ) => {
+    if (targetItems.length === 0) return;
+
+    setPhase3(prev => ({ ...prev, isGeneratingJustification: true }));
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      const prompt = `
+你現在是一位為企業爭取最佳利益的「採購辯護律師」。
+請根據以下的議價結果與市場行情，為目前的「議價後金額」撰寫合理性說明（Justification）。
+
+你的唯一目標是：找出所有有利資訊，證明這個成本是極度合理且具備競爭力的，值得主管核准。
+即便某項目降價不多，也要利用「通膨、品質保證、急單配合度、在地化服務、相較零售價的折扣、長期合作穩定性、技術領先優勢」等商業邏輯來捍衛這個價格。
+
+${isMergedMode ? '【宏觀合併模式】：請針對以下「分類合併後的總金額」產出一段總體性、宏觀的合理性辯護說明。' : '【細項模式】：請為每一個細項產出簡潔專業的辯護文字。'}
+
+購案：${confirmedItemDescription || itemName}
+資料（JSON）：
+${JSON.stringify(targetItems, null, 2)}
+
+輸出要求：
+1. 請以 JSON 格式回覆。
+2. 格式：{ "justifications": { "項目或分類名稱": "辯護說明文字" } }
+3. 字數簡潔、專業、具備說服力，以繁體中文撰寫。
+`;
+
+      const response = await ai.models.generateContent({
+        model: GEMINI_PHASE2_TEXT_MODEL,
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              justifications: {
+                type: Type.OBJECT,
+                additionalProperties: { type: Type.STRING }
+              }
+            },
+            required: ['justifications'],
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text || '{}');
+      const newJustifications = data.justifications || {};
+
+      setPhase3(prev => ({
+        ...prev,
+        justifications: { ...prev.justifications, ...newJustifications },
+        isGeneratingJustification: false
+      }));
+
+    } catch (error) {
+      console.error('Generate justification error:', error);
+      setPhase3(prev => ({ ...prev, isGeneratingJustification: false }));
+    }
+  };
+
+  const handleTogglePhase3Merge = async (checked: boolean) => {
+    setPhase3(prev => ({ ...prev, isMerged: checked }));
+    
+    if (!phase2) return;
+
+    // 如果切換合併模式，且該模式下的辯護說明還沒產生，則自動產生
+    const aggregated = aggregatePhase3Data(phase2, checked);
+    const missingJustification = aggregated.some(item => !phase3.justifications[item.name]);
+
+    if (missingJustification) {
+      const targetItems = aggregated.map(a => ({
+        category: a.category,
+        item: a.name,
+        vendorQuote: a.vendorQuote,
+        finalPrice: a.finalPrice
+      }));
+      await generateCostJustification(targetItems, checked);
+    }
+  };
+
+  const aggregatePhase3Data = (p2: Phase2State, isMerged: boolean) => {
+    if (!isMerged) {
+      return p2.alignedRows.map(r => ({
+        category: r.category,
+        name: r.item,
+        vendorQuote: r.vendorQuote,
+        finalPrice: getCommittedPrice(r.item, r.vendorQuote, p2.negotiationRecords)
+      }));
+    }
+
+    // 按 Category 合併
+    const map = new Map<string, { category: string; vendorQuote: number; finalPrice: number }>();
+    p2.alignedRows.forEach(r => {
+      const cat = r.category || '未分類';
+      const fp = getCommittedPrice(r.item, r.vendorQuote, p2.negotiationRecords);
+      const existing = map.get(cat) || { category: cat, vendorQuote: 0, finalPrice: 0 };
+      map.set(cat, {
+        category: cat,
+        vendorQuote: existing.vendorQuote + r.vendorQuote,
+        finalPrice: existing.finalPrice + fp
+      });
+    });
+
+    return Array.from(map.values()).map(v => ({
+      category: v.category,
+      name: v.category,
+      vendorQuote: v.vendorQuote,
+      finalPrice: v.finalPrice
+    }));
+  };
+
+  const regenerateAllPhase3Justifications = async () => {
+    if (!phase2) return;
+    const aggregated = aggregatePhase3Data(phase2, phase3.isMerged);
+    const targetItems = aggregated.map(a => ({
+      category: a.category,
+      item: a.name,
+      vendorQuote: a.vendorQuote,
+      finalPrice: a.finalPrice
+    }));
+    await generateCostJustification(targetItems, phase3.isMerged);
   };
 
   // 議價表單組件
@@ -1730,12 +1889,13 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                 items: {
                   type: Type.OBJECT,
                   properties: {
+                    category: { type: Type.STRING, description: "分類 (例如：外購件費、加工費、管理費、運費等)" },
                     item: { type: Type.STRING, description: "成本分項名稱 (中文)" },
                     cost: { type: Type.NUMBER, description: "該分項的預估成本" },
                     basis: { type: Type.STRING, description: "計算基礎 (中文)" },
                     explanation: { type: Type.STRING, description: "計算說明：先寫出包含「實際數字」的數學公式（例如：1000 * 5 = 5000，不能只有文字），後面再摘要各個數字的簡要說明 (中文)" }
                   },
-                  required: ["item", "cost", "basis", "explanation"]
+                  required: ["category", "item", "cost", "basis", "explanation"]
                 }
               }
             },
@@ -1771,6 +1931,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
           costBreakdown: data.breakdown || [],
           costHistory: newHistory,
           phase2: undefined,
+          phase3: undefined,
         });
         
         return newHistory;
@@ -2278,6 +2439,19 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
           >
             <Scale size={18} />
             第二階段：廠商報價比對
+          </button>
+          <div className="w-px h-8 bg-slate-200" />
+          <button
+            onClick={() => setActiveTab('phase3')}
+            className={cn(
+              'flex-1 px-6 py-4 font-bold text-sm uppercase tracking-wider transition-all relative flex items-center justify-center gap-2',
+              activeTab === 'phase3'
+                ? 'text-emerald-700 bg-gradient-to-b from-emerald-50 to-emerald-50 border-b-4 border-emerald-600'
+                : 'text-slate-500 hover:text-slate-700 bg-white hover:bg-slate-50'
+            )}
+          >
+            <TrendingDown size={18} />
+            第三階段：主管決策報表
           </button>
         </div>
 
@@ -2816,6 +2990,7 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                         <table className="w-full text-left text-sm">
                           <thead>
                             <tr className="bg-slate-50 text-slate-500 font-bold">
+                              <th className="p-4">分類</th>
                               <th className="p-4">項目</th>
                               <th className="p-4">預估成本</th>
                               <th className="p-4">計算基礎</th>
@@ -2826,6 +3001,11 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                             {costBreakdown.length > 0 ? (
                               costBreakdown.map((item, idx) => (
                                 <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="p-4">
+                                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black border border-slate-200">
+                                      {item.category || '未分類'}
+                                    </span>
+                                  </td>
                                   <td className="p-4 font-bold text-slate-700">{item.item}</td>
                                   <td className="p-4 font-mono text-amber-600">
                                     {item.isUpdating ? (
@@ -2851,14 +3031,14 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                               ))
                             ) : (
                               <tr>
-                                <td colSpan={4} className="p-8 text-center text-slate-400 italic">
+                                <td colSpan={5} className="p-8 text-center text-slate-400 italic">
                                   暫無詳細成本數據
                                 </td>
                               </tr>
                             )}
                             {costBreakdown.length > 0 && (
                               <tr className="bg-amber-100 font-black text-lg border-t-2 border-amber-200">
-                                <td className="p-4 text-amber-900">總計</td>
+                                <td className="p-4 text-amber-900" colSpan={2}>總計</td>
                                 <td className="p-4 text-red-600 text-2xl">${aiEstimatedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                 <td colSpan={2} className="p-4 text-amber-700 text-sm">AI 估算總價</td>
                               </tr>
@@ -3276,6 +3456,211 @@ ${JSON.stringify((currentPhase2.negotiationRecords || []).filter(r => r.item ===
                     </div>
                   </div>
                 )}
+              </section>
+            )}
+
+            {/* Phase 3: 主管決策報表 */}
+            {activeTab === 'phase3' && (
+              <section className="space-y-8">
+                {/* 頂部圖表區 */}
+                <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-emerald-100 rounded-xl border border-emerald-200">
+                        <BarChart size={24} className="text-emerald-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black text-slate-800 tracking-tight">
+                          價格組成與議價成果堆疊圖
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          展示從最初預算、各項成本堆疊，到最終議價後總額 (Commit)
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <div className="relative flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={phase3.isMerged}
+                            onChange={(e) => handleTogglePhase3Merge(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </div>
+                        <span className="text-sm font-bold text-slate-600 group-hover:text-emerald-700 transition-colors flex items-center gap-1.5">
+                          <Plus className={cn("w-4 h-4 transition-transform", phase3.isMerged ? "rotate-45" : "rotate-0")} />
+                          分類合併模式
+                        </span>
+                      </label>
+                      <div className="w-px h-6 bg-slate-300 mx-2" />
+                      <button
+                        onClick={regenerateAllPhase3Justifications}
+                        disabled={phase3.isGeneratingJustification || !phase2}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 text-xs font-bold transition-all disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={phase3.isGeneratingJustification ? "animate-spin" : ""} />
+                        更新 AI 辯護
+                      </button>
+                    </div>
+                  </div>
+
+                  {phase2 ? (
+                    <div className="h-[450px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={[
+                            { name: '原始預算', price: Number(budgetAmount) || 0, type: 'budget' },
+                            ...aggregatePhase3Data(phase2, phase3.isMerged).map(d => ({
+                              name: d.name,
+                              price: d.finalPrice,
+                              vendorQuote: d.vendorQuote,
+                              type: 'item'
+                            })),
+                            {
+                              name: '最終成交價',
+                              price: aggregatePhase3Data(phase2, phase3.isMerged).reduce((s, d) => s + d.finalPrice, 0),
+                              type: 'commit'
+                            }
+                          ]}
+                          margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="name" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                            interval={0}
+                            angle={-25}
+                            textAnchor="end"
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                            tickFormatter={(val) => `$${val.toLocaleString()}`}
+                          />
+                          <Tooltip
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                            formatter={(value: number) => [`$${value.toLocaleString()}`, '金額']}
+                          />
+                          <Bar dataKey="price" radius={[8, 8, 0, 0]} barSize={40}>
+                            {[
+                              { name: '原始預算', type: 'budget' },
+                              ...aggregatePhase3Data(phase2, phase3.isMerged),
+                              { name: '最終成交價', type: 'commit' }
+                            ].map((entry, index) => {
+                              const itemType = (entry as { type?: string }).type;
+                              let fill = '#10b981'; // emerald-500
+                              if (itemType === 'budget') fill = '#3b82f6'; // blue-500
+                              if (itemType === 'commit') fill = '#059669'; // emerald-600
+                              if (itemType === 'item') fill = '#6366f1'; // indigo-500
+                              return <Cell key={`cell-${index}`} fill={fill} />;
+                            })}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="h-[450px] flex flex-col items-center justify-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+                      <TrendingDown size={48} className="text-slate-300 mb-4" />
+                      <p className="text-slate-500 font-bold">請先完成第二階段「廠商報價比對」以產生報表</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 價格組成表 */}
+                <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
+                  <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <h4 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                      <LayoutList size={20} className="text-emerald-600" />
+                      價格組成與合理性說明表
+                    </h4>
+                    {phase3.isGeneratingJustification && (
+                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 animate-pulse">
+                        <Loader2 size={14} className="animate-spin" />
+                        AI 辯護律師撰寫中...
+                      </div>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-widest border-b border-slate-100">
+                          <th className="p-5">分類</th>
+                          {!phase3.isMerged && <th className="p-5">費用項目</th>}
+                          <th className="p-5 text-right">廠商報價</th>
+                          <th className="p-5 text-right">議價後金額</th>
+                          <th className="p-5">AI 採購辯護律師：合理性說明</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {phase2 ? aggregatePhase3Data(phase2, phase3.isMerged).map((row, idx) => (
+                          <tr key={`${row.name}-${idx}`} className="hover:bg-slate-50/80 transition-colors group">
+                            <td className="p-5">
+                              <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 font-bold text-xs border border-slate-200">
+                                {row.category}
+                              </span>
+                            </td>
+                            {!phase3.isMerged && (
+                              <td className="p-5 font-bold text-slate-800">
+                                {row.name}
+                              </td>
+                            )}
+                            <td className="p-5 text-right font-mono text-slate-400 group-hover:text-slate-600">
+                              ${row.vendorQuote.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-5 text-right font-mono font-black text-emerald-700 text-base">
+                              ${row.finalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-5 min-w-[300px]">
+                              {phase3.justifications[row.name] ? (
+                                <div className="flex items-start gap-3">
+                                  <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+                                  <p className="text-slate-600 leading-relaxed italic">
+                                    「{phase3.justifications[row.name]}」
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="text-slate-300 italic flex items-center gap-2">
+                                  {phase3.isGeneratingJustification ? (
+                                    <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> 正在生成合理性說明...</span>
+                                  ) : (
+                                    <span>尚未產生說明</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )) : (
+                          <tr>
+                            <td colSpan={phase3.isMerged ? 4 : 5} className="p-12 text-center text-slate-400 italic">
+                              暫無報表數據，請先完成議價。
+                            </td>
+                          </tr>
+                        )}
+                        {phase2 && (
+                          <tr className="bg-emerald-50/50 font-black text-emerald-900 border-t-2 border-emerald-100">
+                            <td className="p-5" colSpan={phase3.isMerged ? 1 : 2}>總計成交額 (Commit)</td>
+                            <td className="p-5 text-right font-mono">
+                              ${aggregatePhase3Data(phase2, phase3.isMerged).reduce((s, d) => s + d.vendorQuote, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-5 text-right font-mono text-xl">
+                              ${aggregatePhase3Data(phase2, phase3.isMerged).reduce((s, d) => s + d.finalPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-5 text-emerald-600 text-xs italic">
+                              相較廠商初始總報價已爭取到約 {(((aggregatePhase3Data(phase2, phase3.isMerged).reduce((s, d) => s + d.vendorQuote, 0) - aggregatePhase3Data(phase2, phase3.isMerged).reduce((s, d) => s + d.finalPrice, 0)) / aggregatePhase3Data(phase2, phase3.isMerged).reduce((s, d) => s + d.vendorQuote, 1)) * 100).toFixed(1)}% 的降幅空間
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </section>
             )}
 
