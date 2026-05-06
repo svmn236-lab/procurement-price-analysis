@@ -33,7 +33,8 @@ import {
   Lightbulb,
   Building2,
   FileSearch,
-  Scale
+  Scale,
+  BarChart2
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -103,6 +104,8 @@ interface Phase2AlignedRow {
   consultantAnalysis: string;
   varianceAmount: number;
   variancePercent: number | null;
+  groupId: number; // AI 自動分類序號（從1開始）
+  groupName: string; // AI 自動分類名稱（例如：'外購件費'、'物流費'）
 }
 
 interface Phase2State {
@@ -215,7 +218,7 @@ function extractJsonArrayFromText(text: string): VendorPdfLineItem[] {
 }
 
 function rowsToVarianceTable(
-  rows: { category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[]
+  rows: { category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string; groupId: number; groupName: string }[]
 ): Phase2AlignedRow[] {
   return rows.map((r) => {
     const vendorQuote = r.vendorQuote;
@@ -234,6 +237,8 @@ function rowsToVarianceTable(
       consultantAnalysis: r.consultantAnalysis || '',
       varianceAmount,
       variancePercent,
+      groupId: r.groupId,
+      groupName: r.groupName,
     };
   });
 }
@@ -1166,7 +1171,7 @@ export default function ProcurementCostAnalysis() {
   /** 步驟二：將第一階段模擬成本依廠商項目分類重新拆解配對 */
   const alignCostStructures = async (
     vendorLines: VendorPdfLineItem[]
-  ): Promise<{ item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[]> => {
+  ): Promise<{ category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string; groupId: number; groupName: string }[]> => {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     const inputA = JSON.stringify(
       {
@@ -1199,6 +1204,15 @@ ${inputB}
 5. aiReasonableEstimate 為依輸入 A 整體合理預估，配對到該廠商分類後的 AI 合理金額（可為小數，最終四捨五入至合理精度）。
 6. calculationLogic 必須詳細說明 AI 預估金額的計算邏輯，例如："原物料 5kg * 單價 100 + 5% 耗損" 或 "人工費 8小時 * 時薪 150 + 10% 管理費"。
 7. consultantAnalysis 請以採購顧問的角度，針對該成本細項提供一段包含「市場行情洞察」與「具體議價切入點」的分析文字（以繁體中文撰寫，避免空泛，要可落地）。
+8. groupId：請根據採購實務將相似的成本細項歸類。性質相近的項目（例如多個零件或相同類型的費用）請給予相同的 groupId（數值，從1開始遞增）。獨立項目（如運費、包裝費）則單獨給予一個新的 groupId。groupId 必須是正整數。
+9. groupName：對應該 groupId 的分類名稱，例如：'外購件費'、'加工費'、'物流費'、'包裝費'、'管理費'等。必須是有意義的繁體中文名稱。
+
+分類指南：
+- 如果有多個零件或元件，應該歸為同一個分類（例如都是 groupId=1 '外購件費'）。
+- 人工費、加工費應該單獨分類。
+- 物流費、運費應該單獨分類。
+- 包裝費應該單獨分類。
+- 管理費、利潤應該單獨分類。
 
 請嚴格以 JSON 格式回覆，不要包含其他文字。
 `;
@@ -1223,8 +1237,10 @@ ${inputB}
                   aiReasonableEstimate: { type: Type.NUMBER },
                   calculationLogic: { type: Type.STRING },
                   consultantAnalysis: { type: Type.STRING },
+                  groupId: { type: Type.NUMBER },
+                  groupName: { type: Type.STRING },
                 },
-                required: ['category', 'item', 'vendorQuote', 'aiReasonableEstimate', 'calculationLogic', 'consultantAnalysis'],
+                required: ['category', 'item', 'vendorQuote', 'aiReasonableEstimate', 'calculationLogic', 'consultantAnalysis', 'groupId', 'groupName'],
               },
             },
           },
@@ -1235,7 +1251,7 @@ ${inputB}
 
     const data = JSON.parse(response.text || '{}');
     const rows = Array.isArray(data.rows) ? data.rows : [];
-    return rows as { category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string }[];
+    return rows as { category: string; item: string; vendorQuote: number; aiReasonableEstimate: number; calculationLogic: string; consultantAnalysis: string; groupId: number; groupName: string }[];
   };
 
   /** 步驟三：依差異分析產出談判策略 */
@@ -1311,6 +1327,19 @@ ${hasNegotiationFeedback ? `
       return updatedPhase2;
     });
     setExpandedNegotiationItems(prev => prev.filter(i => i !== record.item));
+  };
+
+  /** 更新 Phase 2 中的分類設定 (groupId 和 groupName) */
+  const updateRowGrouping = (item: string, groupId: number, groupName: string) => {
+    setPhase2(prev => {
+      if (!prev) return prev;
+      const updatedRows = prev.alignedRows.map(r =>
+        r.item === item ? { ...r, groupId, groupName } : r
+      );
+      const updatedPhase2 = { ...prev, alignedRows: updatedRows };
+      saveCurrentProject(undefined, { phase2: updatedPhase2 });
+      return updatedPhase2;
+    });
   };
 
   const handlePhase2ChatMessage = async () => {
@@ -1391,7 +1420,7 @@ ${phase2.phase2ChatMessages?.map(m => `${m.role === 'user' ? '使用者' : 'AI'}
   const generatePhase2AnalysisForItem = async (
     row: Phase2AlignedRow,
     currentPhase2: Phase2State
-  ): Promise<{ calculationLogic: string; consultantAnalysis: string; assistantReply: string }> => {
+  ): Promise<{ category: string; calculationLogic: string; consultantAnalysis: string; assistantReply: string }> => {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     const prompt = `
 你是一位資深採購議價顧問。請針對「廠商報價 vs AI 合理預估」差異分析中的單一成本細項，產出可供採購議價的專業分析。
@@ -1639,33 +1668,44 @@ ${JSON.stringify(targetItems, null, 2)}
 
   const aggregatePhase3Data = (p2: Phase2State, isMerged: boolean) => {
     if (!isMerged) {
-      return p2.alignedRows.map(r => ({
-        category: r.category,
-        name: r.item,
-        vendorQuote: r.vendorQuote,
-        finalPrice: getCommittedPrice(r.item, r.vendorQuote, p2.negotiationRecords)
-      }));
+      // 不合併時，按 groupId 排序，但保留所有單個項目
+      return p2.alignedRows
+        .sort((a, b) => a.groupId - b.groupId || a.item.localeCompare(b.item))
+        .map(r => ({
+          groupId: r.groupId,
+          groupName: r.groupName,
+          category: r.groupName,
+          name: r.item,
+          vendorQuote: r.vendorQuote,
+          finalPrice: getCommittedPrice(r.item, r.vendorQuote, p2.negotiationRecords)
+        }));
     }
 
-    // 按 Category 合併
-    const map = new Map<string, { category: string; vendorQuote: number; finalPrice: number }>();
+    // 合併模式：按 groupId 和 groupName 聚合
+    const map = new Map<number, { groupId: number; groupName: string; vendorQuote: number; finalPrice: number }>();
     p2.alignedRows.forEach(r => {
-      const cat = r.category || '未分類';
+      const groupKey = r.groupId;
       const fp = getCommittedPrice(r.item, r.vendorQuote, p2.negotiationRecords);
-      const existing = map.get(cat) || { category: cat, vendorQuote: 0, finalPrice: 0 };
-      map.set(cat, {
-        category: cat,
+      const existing = map.get(groupKey) || { groupId: r.groupId, groupName: r.groupName, vendorQuote: 0, finalPrice: 0 };
+      map.set(groupKey, {
+        groupId: r.groupId,
+        groupName: r.groupName,
         vendorQuote: existing.vendorQuote + r.vendorQuote,
         finalPrice: existing.finalPrice + fp
       });
     });
 
-    return Array.from(map.values()).map(v => ({
-      category: v.category,
-      name: v.category,
-      vendorQuote: v.vendorQuote,
-      finalPrice: v.finalPrice
-    }));
+    // 按 groupId 排序返回
+    return Array.from(map.values())
+      .sort((a, b) => a.groupId - b.groupId)
+      .map(v => ({
+        groupId: v.groupId,
+        groupName: v.groupName,
+        category: v.groupName,
+        name: v.groupName,
+        vendorQuote: v.vendorQuote,
+        finalPrice: v.finalPrice
+      }));
   };
 
   const regenerateAllPhase3Justifications = async () => {
@@ -3189,6 +3229,7 @@ ${JSON.stringify(targetItems, null, 2)}
                             <th className="p-4 font-bold">AI 合理預估</th>
                             <th className="p-4 font-bold">差異金額</th>
                             <th className="p-4 font-bold">差異百分比</th>
+                            <th className="p-4 font-bold">分類設定</th>
                             <th className="p-4 font-bold rounded-tr-2xl">議價操作</th>
                           </tr>
                         </thead>
@@ -3279,6 +3320,32 @@ ${JSON.stringify(targetItems, null, 2)}
                                       : '—'}
                                   </td>
                                   <td className="p-4">
+                                    <div className="flex flex-col gap-2">
+                                      <div className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                                        [{row.groupId}] {row.groupName}
+                                      </div>
+                                      <div className="flex gap-1 items-center">
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          value={row.groupId}
+                                          onChange={(e) => {
+                                            const newGroupId = parseInt(e.target.value) || 1;
+                                            updateRowGrouping(row.item, newGroupId, row.groupName);
+                                          }}
+                                          className="w-12 px-2 py-1 text-xs border border-slate-300 rounded text-center focus:ring-2 focus:ring-violet-400 outline-none"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={row.groupName}
+                                          onChange={(e) => updateRowGrouping(row.item, row.groupId, e.target.value)}
+                                          placeholder="分類名稱"
+                                          className="flex-1 px-2 py-1 text-xs border border-slate-300 rounded focus:ring-2 focus:ring-violet-400 outline-none"
+                                        />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="p-4">
                                     <button
                                       onClick={() => toggleNegotiationForm(row.item)}
                                       className={cn(
@@ -3295,7 +3362,7 @@ ${JSON.stringify(targetItems, null, 2)}
                                 </tr>
                                 {isExpanded && (
                                   <tr className="bg-violet-50/30">
-                                    <td colSpan={6} className="p-4">
+                                    <td colSpan={7} className="p-4">
                                       <NegotiationForm
                                         item={row.item}
                                         currentRecord={negotiationRecord}
@@ -3467,7 +3534,7 @@ ${JSON.stringify(targetItems, null, 2)}
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
                     <div className="flex items-center gap-3">
                       <div className="p-2.5 bg-emerald-100 rounded-xl border border-emerald-200">
-                        <BarChart size={24} className="text-emerald-600" />
+                        <BarChart2 size={24} className="text-emerald-600" />
                       </div>
                       <div>
                         <h3 className="text-xl font-black text-slate-800 tracking-tight">
@@ -3838,7 +3905,8 @@ ${JSON.stringify(targetItems, null, 2)}
             )}
           </div>
 
-          {/* Right Column: History Panel */}
+          {/* Right Column: History Panel - 第三階段不顯示 */}
+          {activeTab !== 'phase3' && (
           <div className="lg:col-span-3">
             <section className="bg-white p-5 rounded-2xl shadow-xl border border-slate-200 sticky top-6 max-h-[calc(100vh-48px)] flex flex-col overflow-hidden min-h-0">
               <div className="flex items-center justify-between mb-4">
@@ -3939,6 +4007,7 @@ ${JSON.stringify(targetItems, null, 2)}
               </div>
             </section>
           </div>
+          )}
         </div>
       </div>
 
