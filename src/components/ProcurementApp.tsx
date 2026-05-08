@@ -6,7 +6,7 @@ import {
   Plus, FolderOpen, RefreshCw, Lightbulb, FileText, Trash2, Upload,
   CheckCircle2, Loader2, Sparkles, DollarSign, GitCompare, MessageSquare,
   FileSearch, AlertTriangle, Bot, Send, User, Camera, Download, Building2,
-  BarChart2, Save, FileSpreadsheet
+  BarChart2, Save, FileSpreadsheet, Edit2, X
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Markdown from "react-markdown";
@@ -15,7 +15,10 @@ import { cn } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 export default function ProcurementApp() {
-  const { NegotiationForm, activeChatId, activeCostItem, activeTab, aggregatePhase3Data, aiEstimatedPrice, aiInsights, aiInsightsRef, alignedRows, alternatives, appRef, applicant, budgetAmount, calculationLogic, cancelEditing, category, chartData, chatInput, chatMessages, confirmedItemDescription, confirmedItemRef, consolidatedSpecs, consolidationError, consultantAnalysis, context, costBreakdown, costHistory, currentProjectId, department, diffExplanations, div, docNumber, editingContent, editingSpecIndex, expandedDiffId, expandedNegotiationItems, exportHistoryAsExcel, fetchAlternatives, fetchRecommendedVendors, file, handleAddSpec, handleAddVendor, handleClearAll, handleCompareDiff, handleConditionChange, handleConsolidateSpecs, handleDeleteHistoryEntry, handleImportHistoryFile, handleOpenChat, handlePhase2ChatMessage, handleRemoveSpec, handleRemoveVendor, handleScreenshot, handleSectionScreenshot, handleSelectPhase2AnalysisItem, handleBatchGeneratePhase2Analysis, handleSendItemChatMessage, handleSendMessage, handleSendOverallChatMessage, handleSetAdopted, handleSpecChange, handleStartItemClarification, handleTogglePhase3Merge, handleUpdateCostItem, handleVendorChange, handleVendorQuotePdfSelected, handler, handlingSection, historyFeedback, historyImportRef, index, isAnalyzing, isChatLoading, isConsolidating, isFetchingAlternatives, isFetchingRecommendedVendors, isItemChatLoading, isItemModalOpen, isOverallChatLoading, isPhase2Aligning, isPhase2AnalysisLoading, isPhase2ChatLoading, isPhase2Negotiating, isPhase2Parsing, isSpecsConfirmed, itemChatInput, itemChatMessages, itemName, loadProject, map, msg, negotiationStrategy, overallChatInput, overallChatMessages, phase2, phase2AnalysisError, phase2ChatInput, phase2Error, phase3, placeholder, projectName, proposedItemDescription, quoteTimeframe, reason, recommendedVendors, record, regenerateAllPhase3Justifications, regenerateNegotiationStrategy, rows, runAiAnalysis, saveCurrentProject, saveEditing, saveNegotiationRecord, savedProjects, section, selectedAnalysisItem, setActiveChatId, setActiveTab, setApplicant, setBudgetAmount, setChatInput, setConfirmedItemDescription, setDepartment, setDocNumber, setEditingContent, setHandler, setHandlingSection, setIsItemModalOpen, setIsSpecsConfirmed, setItemChatInput, setItemName, setOverallChatInput, setPhase2ChatInput, setProjectName, setQuoteTimeframe, setSection, setSelectedAnalysisItem, setShowAiInsights, setShowAlternativesModal, setShowBreakdown, setShowDiffModal, setShowOverallChat, setShowProcurementInputs, setShowProjectDetails, setShowRecommendedVendorsModal, setShowSavedProjectsModal, setShowSpecSummary, setShowVendorSection, setSpecFile, setTotalQty, showAiInsights, showAlternativesModal, showBreakdown, showDiffModal, showOverallChat, showProcurementInputs, showProjectDetails, showRecommendedVendorsModal, showSavedProjectsModal, showSpecSummary, showVendorSection, specFile, startEditing, supplementarySpecs, text, timestamp, toggleNegotiationForm, totalQty, updateRowGrouping, value, vendorPdfInputRef, vendorPdfParsedLines, vendors } = useProcurement();
+  const { NegotiationForm, activeChatId, activeCostItem, activeTab, aggregatePhase3Data, aiEstimatedPrice, aiInsights, aiInsightsRef, alignedRows, alternatives, appRef, applicant, budgetAmount, calculationLogic, cancelEditing, category, chartData, chatInput, chatMessages, confirmedItemDescription, confirmedItemRef, consolidatedSpecs, consolidationError, consultantAnalysis, context, costBreakdown, costHistory, currentProjectId, department, diffExplanations, div, docNumber, editingContent, editingSpecIndex, expandedDiffId, expandedNegotiationItems, exportHistoryAsExcel, fetchAlternatives, fetchRecommendedVendors, file, handleAddSpec, handleAddVendor, handleClearAll, handleCompareDiff, handleConditionChange, handleConsolidateSpecs, handleDeleteHistoryEntry, handleImportHistoryFile, handleOpenChat, handlePhase2ChatMessage, handleRemoveSpec, handleRemoveVendor, handleScreenshot, handleSectionScreenshot, handleSelectPhase2AnalysisItem, handleBatchGeneratePhase2Analysis, handleSendItemChatMessage, handleSendMessage, handleSendOverallChatMessage, handleSetAdopted, handleSpecChange, handleStartItemClarification, handleTogglePhase3Merge, handleUpdateCostItem, handleVendorChange, handleVendorQuotePdfSelected, handleEditPhase2Row, handleDeletePhase2Row, handler, handlingSection, historyFeedback, historyImportRef, index, isAnalyzing, isChatLoading, isConsolidating, isFetchingAlternatives, isFetchingRecommendedVendors, isItemChatLoading, isItemModalOpen, isOverallChatLoading, isPhase2Aligning, isPhase2AnalysisLoading, isPhase2ChatLoading, isPhase2Negotiating, isPhase2Parsing, isSpecsConfirmed, itemChatInput, itemChatMessages, itemName, loadProject, map, msg, negotiationStrategy, overallChatInput, overallChatMessages, phase2, phase2AnalysisError, phase2ChatInput, phase2Error, phase3, placeholder, projectName, proposedItemDescription, quoteTimeframe, reason, recommendedVendors, record, regenerateAllPhase3Justifications, regenerateNegotiationStrategy, rows, runAiAnalysis, saveCurrentProject, saveEditing, saveNegotiationRecord, savedProjects, section, selectedAnalysisItem, setActiveChatId, setActiveTab, setApplicant, setBudgetAmount, setChatInput, setConfirmedItemDescription, setDepartment, setDocNumber, setEditingContent, setHandler, setHandlingSection, setIsItemModalOpen, setIsSpecsConfirmed, setItemChatInput, setItemName, setOverallChatInput, setPhase2ChatInput, setProjectName, setQuoteTimeframe, setSection, setSelectedAnalysisItem, setShowAiInsights, setShowAlternativesModal, setShowBreakdown, setShowDiffModal, setShowOverallChat, setShowProcurementInputs, setShowProjectDetails, setShowRecommendedVendorsModal, setShowSavedProjectsModal, setShowSpecSummary, setShowVendorSection, setSpecFile, setTotalQty, showAiInsights, showAlternativesModal, showBreakdown, showDiffModal, showOverallChat, showProcurementInputs, showProjectDetails, showRecommendedVendorsModal, showSavedProjectsModal, showSpecSummary, showVendorSection, specFile, startEditing, supplementarySpecs, text, timestamp, toggleNegotiationForm, totalQty, updateRowGrouping, value, vendorPdfInputRef, vendorPdfParsedLines, vendors } = useProcurement();
+
+  const [editingRowItem, setEditingRowItem] = React.useState<string | null>(null);
+  const [editFormData, setEditFormData] = React.useState<{ item: string; vendorQuote: number; aiEstimate: number } | null>(null);
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900" ref={appRef}>
@@ -877,7 +880,8 @@ export default function ProcurementApp() {
                             <th className="p-4 font-bold">差異金額</th>
                             <th className="p-4 font-bold">差異百分比</th>
                             <th className="p-4 font-bold">分類設定</th>
-                            <th className="p-4 font-bold rounded-tr-2xl">議價操作</th>
+                            <th className="p-4 font-bold">議價操作</th>
+                            <th className="p-4 font-bold rounded-tr-2xl">操作</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -905,7 +909,16 @@ export default function ProcurementApp() {
                                       vendorHighVersusAi ? 'text-red-900' : 'text-slate-800'
                                     )}
                                   >
-                                    {row.item}
+                                    {editingRowItem === row.item ? (
+                                      <input
+                                        type="text"
+                                        value={editFormData?.item || ''}
+                                        onChange={(e) => setEditFormData(prev => prev ? { ...prev, item: e.target.value } : null)}
+                                        className="w-full px-2 py-1 text-sm border border-violet-300 rounded focus:ring-2 focus:ring-violet-400 outline-none"
+                                      />
+                                    ) : (
+                                      row.item
+                                    )}
                                   </td>
                                   <td
                                     className={cn(
@@ -913,36 +926,62 @@ export default function ProcurementApp() {
                                       vendorHighVersusAi ? 'text-red-700' : 'text-slate-700'
                                     )}
                                   >
-                                    $
-                                    {row.vendorQuote.toLocaleString(undefined, {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
-                                  </td>
-                                  <td className="p-4">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSelectPhase2AnalysisItem(row)}
-                                      disabled={isPhase2AnalysisLoading}
-                                      className={cn(
-                                        'text-left rounded-lg transition-colors cursor-pointer',
-                                        selectedAnalysisItem?.item === row.item
-                                          ? 'bg-emerald-50/80'
-                                          : 'hover:bg-slate-50'
-                                      )}
-                                      title="點擊查看分析"
-                                    >
-                                      <div className="font-mono text-emerald-700 font-semibold underline underline-offset-4 decoration-emerald-300 hover:text-emerald-800">
+                                    {editingRowItem === row.item ? (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-slate-500">$</span>
+                                        <input
+                                          type="number"
+                                          value={editFormData?.vendorQuote || 0}
+                                          onChange={(e) => setEditFormData(prev => prev ? { ...prev, vendorQuote: Number(e.target.value) } : null)}
+                                          className="w-24 px-2 py-1 text-sm border border-violet-300 rounded focus:ring-2 focus:ring-violet-400 outline-none bg-white/80"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <>
                                         $
-                                        {row.aiEstimate.toLocaleString(undefined, {
+                                        {row.vendorQuote.toLocaleString(undefined, {
                                           minimumFractionDigits: 2,
                                           maximumFractionDigits: 2,
                                         })}
+                                      </>
+                                    )}
+                                  </td>
+                                  <td className="p-4">
+                                    {editingRowItem === row.item ? (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-slate-500">$</span>
+                                        <input
+                                          type="number"
+                                          value={editFormData?.aiEstimate || 0}
+                                          onChange={(e) => setEditFormData(prev => prev ? { ...prev, aiEstimate: Number(e.target.value) } : null)}
+                                          className="w-24 px-2 py-1 text-sm border border-emerald-300 rounded focus:ring-2 focus:ring-emerald-400 outline-none bg-white/80"
+                                        />
                                       </div>
-                                      <div className="text-[11px] text-slate-400 mt-1 italic">
-                                        點擊查看分析
-                                      </div>
-                                    </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectPhase2AnalysisItem(row)}
+                                        disabled={isPhase2AnalysisLoading}
+                                        className={cn(
+                                          'text-left rounded-lg transition-colors cursor-pointer',
+                                          selectedAnalysisItem?.item === row.item
+                                            ? 'bg-emerald-50/80'
+                                            : 'hover:bg-slate-50'
+                                        )}
+                                        title="點擊查看分析"
+                                      >
+                                        <div className="font-mono text-emerald-700 font-semibold underline underline-offset-4 decoration-emerald-300 hover:text-emerald-800">
+                                          $
+                                          {row.aiEstimate.toLocaleString(undefined, {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}
+                                        </div>
+                                        <div className="text-[11px] text-slate-400 mt-1 italic">
+                                          點擊查看分析
+                                        </div>
+                                      </button>
+                                    )}
                                   </td>
                                   <td
                                     className={cn(
@@ -1006,10 +1045,69 @@ export default function ProcurementApp() {
                                       {negotiationRecord ? '編輯議價' : '開始議價'}
                                     </button>
                                   </td>
+                                  <td className="p-4">
+                                    <div className="flex items-center gap-2">
+                                      {editingRowItem === row.item ? (
+                                        <>
+                                          <button
+                                            onClick={() => {
+                                              if (editFormData) {
+                                                handleEditPhase2Row(row.item, { ...row, ...editFormData });
+                                              }
+                                              setEditingRowItem(null);
+                                              setEditFormData(null);
+                                            }}
+                                            className="p-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-lg transition-colors"
+                                            title="儲存"
+                                          >
+                                            <Save size={16} />
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setEditingRowItem(null);
+                                              setEditFormData(null);
+                                            }}
+                                            className="p-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+                                            title="取消"
+                                          >
+                                            <X size={16} />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => {
+                                              setEditingRowItem(row.item);
+                                              setEditFormData({
+                                                item: row.item,
+                                                vendorQuote: row.vendorQuote,
+                                                aiEstimate: row.aiEstimate
+                                              });
+                                            }}
+                                            className="p-1.5 bg-violet-50 text-violet-600 hover:bg-violet-100 rounded-lg transition-colors"
+                                            title="編輯"
+                                          >
+                                            <Edit2 size={16} />
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              if (window.confirm('確定要刪除此細項嗎？')) {
+                                                handleDeletePhase2Row(row.item);
+                                              }
+                                            }}
+                                            className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                                            title="刪除"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
                                 </tr>
                                 {isExpanded && (
                                   <tr className="bg-violet-50/30">
-                                    <td colSpan={7} className="p-4">
+                                    <td colSpan={8} className="p-4">
                                       <NegotiationForm
                                         item={row.item}
                                         currentRecord={negotiationRecord}
@@ -1054,7 +1152,7 @@ export default function ProcurementApp() {
                                 maximumFractionDigits: 2,
                               })}
                             </td>
-                            <td colSpan={2} className="p-4 rounded-br-2xl text-slate-300">
+                            <td colSpan={3} className="p-4 rounded-br-2xl text-slate-300">
                               廠商 vs AI 總差異
                             </td>
                           </tr>

@@ -1,22 +1,22 @@
 export interface Vendor { id: string; name: string; price: number; }
 
-export interface CostItem { 
-  category: string; 
-  item: string; 
-  cost: number; 
-  basis: string; 
-  explanation: string; 
-  customCondition?: string; 
-  isUpdating?: boolean; 
+export interface CostItem {
+  category: string;
+  item: string;
+  cost: number;
+  basis: string;
+  explanation: string;
+  customCondition?: string;
+  isUpdating?: boolean;
 }
 
-export interface ConsolidatedSpec { 
-  category: string; 
-  content: string; 
-  source: string; 
-  hasContradiction: boolean; 
-  warningMessage?: string; 
-  rejectedContent?: string; 
+export interface ConsolidatedSpec {
+  category: string;
+  content: string;
+  source: string;
+  hasContradiction: boolean;
+  warningMessage?: string;
+  rejectedContent?: string;
 }
 
 export interface CostHistoryEntry {
@@ -57,12 +57,12 @@ export interface Phase2AlignedRow {
   item: string;
   vendorQuote: number;
   aiEstimate: number;
-  calculationLogic: string; 
+  calculationLogic: string;
   consultantAnalysis: string;
   varianceAmount: number;
   variancePercent: number | null;
-  groupId: number; 
-  groupName: string; 
+  groupId: number;
+  groupName: string;
 }
 
 export interface Phase2State {
@@ -76,7 +76,7 @@ export interface Phase2State {
 
 export interface Phase3State {
   isMerged: boolean;
-  justifications: Record<string, string>; 
+  justifications: Record<string, string>;
   isGeneratingJustification: boolean;
 }
 

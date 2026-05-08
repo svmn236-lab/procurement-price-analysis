@@ -792,6 +792,37 @@ const {
     });
   };
 
+  const handleEditPhase2Row = (oldItemName: string, updatedRow: Phase2AlignedRow) => {
+    setPhase2(prev => {
+      if (!prev) return prev;
+      const updatedRows = prev.alignedRows.map(r => {
+        if (r.item === oldItemName) {
+          const aiEst = updatedRow.aiEstimate || 0;
+          const diff = updatedRow.vendorQuote - aiEst;
+          return {
+            ...updatedRow,
+            varianceAmount: diff,
+            variancePercent: aiEst !== 0 ? (diff / aiEst) * 100 : 0
+          };
+        }
+        return r;
+      });
+      const updatedPhase2 = { ...prev, alignedRows: updatedRows };
+      saveCurrentProject(undefined, { phase2: updatedPhase2 });
+      return updatedPhase2;
+    });
+  };
+
+  const handleDeletePhase2Row = (itemName: string) => {
+    setPhase2(prev => {
+      if (!prev) return prev;
+      const updatedRows = prev.alignedRows.filter(r => r.item !== itemName);
+      const updatedPhase2 = { ...prev, alignedRows: updatedRows };
+      saveCurrentProject(undefined, { phase2: updatedPhase2 });
+      return updatedPhase2;
+    });
+  };
+
   const handlePhase2ChatMessage = async () => {
     if (!phase2ChatInput.trim() || !phase2) return;
 
@@ -1431,6 +1462,7 @@ const {
     handleSendItemChatMessage, handleSendMessage, handleSendOverallChatMessage, 
     handleSetAdopted, handleSpecChange, handleStartItemClarification, 
     handleTogglePhase3Merge, handleUpdateCostItem, handleVendorQuotePdfSelected, 
+    handleEditPhase2Row, handleDeletePhase2Row,
     loadProject, normalizeImportedProject, parseJsonCell, parseVendorQuotePdfWithGemini, 
     regenerateAllPhase3Justifications, regenerateNegotiationStrategy, 
     runAiAnalysis, saveCurrentProject, saveEditing, saveNegotiationRecord, 
