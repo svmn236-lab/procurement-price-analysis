@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { Scale, Upload, Loader2, AlertTriangle, FileSearch, FileText, Sparkles, ChevronUp, ChevronDown, Save, X, Edit2, Trash2, Bot, Send, User, Lightbulb } from "lucide-react";
+import { Scale, Upload, Loader2, AlertTriangle, FileSearch, FileText, Sparkles, ChevronUp, ChevronDown, Save, X, Edit2, Trash2, Bot, Send, User, Lightbulb, RefreshCw } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -18,17 +18,14 @@ interface Phase2ComparisonProps {
   phase2: Phase2State | undefined;
   handleBatchGeneratePhase2Analysis: () => void;
   isPhase2AnalysisLoading: boolean;
-  editingRowItem: string | null;
-  setEditingRowItem: (item: string | null) => void;
-  editFormData: { item: string; vendorQuote: number; aiEstimate: number } | null;
-  setEditFormData: (data: { item: string; vendorQuote: number; aiEstimate: number } | null) => void;
   handleSelectPhase2AnalysisItem: (row: Phase2AlignedRow) => void;
   selectedAnalysisItem: Phase2AlignedRow | null;
   updateRowGrouping: (item: string, groupId: number, groupName: string) => void;
   toggleNegotiationForm: (item: string) => void;
   expandedNegotiationItems: string[];
-  handleEditPhase2Row: (oldItem: string, newData: any) => void;
+  handleEditPhase2Row: (item: string, field: string, value: any) => void;
   handleDeletePhase2Row: (item: string) => void;
+  handlePhase2QuoteVersionChange: (version: string) => void;
   saveNegotiationRecord: (record: NegotiationRecord) => void;
   regenerateNegotiationStrategy: () => void;
   phase2ChatInput: string;
@@ -50,10 +47,6 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
   phase2,
   handleBatchGeneratePhase2Analysis,
   isPhase2AnalysisLoading,
-  editingRowItem,
-  setEditingRowItem,
-  editFormData,
-  setEditFormData,
   handleSelectPhase2AnalysisItem,
   selectedAnalysisItem,
   updateRowGrouping,
@@ -61,6 +54,7 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
   expandedNegotiationItems,
   handleEditPhase2Row,
   handleDeletePhase2Row,
+  handlePhase2QuoteVersionChange,
   saveNegotiationRecord,
   regenerateNegotiationStrategy,
   phase2ChatInput,
@@ -69,6 +63,42 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
   isPhase2ChatLoading,
   NegotiationForm,
 }) => {
+  const [isGroupView, setIsGroupView] = React.useState(false);
+  const [editingRowItem, setEditingRowItem] = React.useState<string | null>(null);
+  const [editFormData, setEditFormData] = React.useState<{ item: string; vendorQuote: number; aiEstimate: number } | null>(null);
+
+  const displayRows = React.useMemo(() => {
+    if (!phase2?.alignedRows) return [];
+    if (!isGroupView) return phase2.alignedRows;
+
+    const groups: Record<string, any> = {};
+    phase2.alignedRows.forEach(row => {
+      const name = row.groupName || `未分類 (${row.groupId})`;
+      if (!groups[name]) {
+        groups[name] = {
+          item: name,
+          groupName: name,
+          vendorQuote: 0,
+          aiEstimate: 0,
+          varianceAmount: 0,
+          isGroup: true,
+          groupId: row.groupId
+        };
+      }
+      groups[name].vendorQuote += row.vendorQuote;
+      groups[name].aiEstimate += row.aiEstimate;
+    });
+
+    return Object.values(groups).map(g => {
+      const diff = g.vendorQuote - g.aiEstimate;
+      return {
+        ...g,
+        varianceAmount: diff,
+        variancePercent: g.aiEstimate !== 0 ? (diff / g.aiEstimate) * 100 : 0
+      };
+    });
+  }, [phase2?.alignedRows, isGroupView]);
+
   if (aiEstimatedPrice === null) return null;
 
   return (
@@ -87,7 +117,19 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">報價版次</span>
+            <select
+              value={phase2?.quoteVersion || '第 1 次報價'}
+              onChange={(e) => handlePhase2QuoteVersionChange(e.target.value)}
+              className="p-2.5 bg-white border border-violet-200 rounded-xl text-sm font-bold text-violet-700 outline-none focus:ring-2 focus:ring-violet-500 transition-all"
+            >
+              <option value="第 1 次報價">第 1 次報價</option>
+              <option value="第 2 次報價">第 2 次報價</option>
+              <option value="最終議價版">最終議價版</option>
+            </select>
+          </div>
           <input
             ref={vendorPdfInputRef}
             type="file"
@@ -111,7 +153,7 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
             ) : (
               <Upload className="w-4 h-4" />
             )}
-            上傳廠商報價單（PDF）
+            上傳廠商報價單
           </button>
         </div>
       </div>
@@ -121,7 +163,7 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
           {isPhase2Parsing && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-violet-200 shadow-sm">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              解析 PDF（Gemini 視覺萃取）…
+              解析報價單（Gemini 視覺萃取）…
             </span>
           )}
           {isPhase2Aligning && (
@@ -163,66 +205,71 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
 
       {phase2 && phase2.alignedRows.length > 0 && (
         <>
-          <div className="mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-slate-800">
-              <FileText className="w-5 h-5 text-violet-600" />
-              <h4 className="text-lg font-black">差異分析比較表</h4>
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-slate-800">
+                <FileText className="w-5 h-5 text-violet-600" />
+                <h4 className="text-lg font-black">差異分析比較表</h4>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer group bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm hover:border-violet-300 transition-all">
+                <input
+                  type="checkbox"
+                  checked={isGroupView}
+                  onChange={(e) => setIsGroupView(e.target.checked)}
+                  className="w-4 h-4 text-violet-600 rounded border-slate-300 focus:ring-violet-500"
+                />
+                <span className="text-sm font-bold text-slate-600 group-hover:text-violet-700">切換為分類合併檢視</span>
+              </label>
             </div>
-            <button
-              onClick={handleBatchGeneratePhase2Analysis}
-              disabled={isPhase2AnalysisLoading}
-              className={cn(
-                "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm",
-                isPhase2AnalysisLoading 
-                  ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
-                  : "bg-violet-600 text-white hover:bg-violet-700 active:scale-95"
-              )}
-            >
-              {isPhase2AnalysisLoading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="w-3.5 h-3.5" />
-              )}
-              AI 批次分析所有細項 (節省 API)
-            </button>
+            {!isGroupView && (
+              <button
+                onClick={() => handleBatchGeneratePhase2Analysis()}
+                disabled={isPhase2AnalysisLoading}
+                className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm",
+                  isPhase2AnalysisLoading 
+                    ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
+                    : "bg-violet-600 text-white hover:bg-violet-700 active:scale-95"
+                )}
+              >
+                {isPhase2AnalysisLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                AI 批次分析所有細項
+              </button>
+            )}
           </div>
           <div className="overflow-x-auto rounded-2xl border border-violet-100 bg-white shadow-inner mb-8">
             <table className="w-full text-left text-sm min-w-[900px]">
               <thead>
                 <tr className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white">
-                  <th className="p-4 font-bold rounded-tl-2xl">成本細項</th>
+                  <th className="p-4 font-bold rounded-tl-2xl">{isGroupView ? '大分類' : '成本細項'}</th>
                   <th className="p-4 font-bold">廠商報價</th>
                   <th className="p-4 font-bold">AI 合理預估</th>
                   <th className="p-4 font-bold">差異金額</th>
                   <th className="p-4 font-bold">差異百分比</th>
-                  <th className="p-4 font-bold">分類設定</th>
-                  <th className="p-4 font-bold">議價操作</th>
-                  <th className="p-4 font-bold rounded-tr-2xl">操作</th>
+                  {!isGroupView && <th className="p-4 font-bold">分類設定</th>}
+                  {!isGroupView && <th className="p-4 font-bold">議價操作</th>}
+                  {!isGroupView && <th className="p-4 font-bold rounded-tr-2xl">操作</th>}
+                  {isGroupView && <th className="p-4 font-bold rounded-tr-2xl" colSpan={3}>備註</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {phase2.alignedRows.map((row, idx) => {
+                {displayRows.map((row, idx) => {
                   const vendorHighVersusAi =
                     row.aiEstimate > 0
                       ? row.vendorQuote > row.aiEstimate * 1.1
                       : row.vendorQuote > 0;
-                  const negotiationRecord = phase2.negotiationRecords?.find(r => r.item === row.item);
-                  const isExpanded = expandedNegotiationItems?.includes(row.item);
+                  const negotiationRecord = !row.isGroup ? phase2.negotiationRecords?.find(r => r.item === row.item) : null;
+                  const isExpanded = !row.isGroup && expandedNegotiationItems?.includes(row.item);
 
                   return (
                     <React.Fragment key={`${row.item}-${idx}`}>
                       <tr className={cn('transition-colors', vendorHighVersusAi ? 'bg-red-50/90 hover:bg-red-50' : 'hover:bg-slate-50/80')}>
                         <td className={cn('p-4 font-bold', vendorHighVersusAi ? 'text-red-900' : 'text-slate-800')}>
-                          {editingRowItem === row.item ? (
-                            <input
-                              type="text"
-                              value={editFormData?.item || ''}
-                              onChange={(e) => setEditFormData(prev => prev ? { ...prev, item: e.target.value } : null)}
-                              className="w-full px-2 py-1 text-sm border border-violet-300 rounded focus:ring-2 focus:ring-violet-400 outline-none"
-                            />
-                          ) : (
-                            row.item
-                          )}
+                          {row.item}
                         </td>
                         <td className={cn('p-4 font-mono font-semibold', vendorHighVersusAi ? 'text-red-700' : 'text-slate-700')}>
                           {editingRowItem === row.item ? (
@@ -230,9 +277,14 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
                               <span className="text-slate-500">$</span>
                               <input
                                 type="number"
-                                value={editFormData?.vendorQuote || 0}
-                                onChange={(e) => setEditFormData(prev => prev ? { ...prev, vendorQuote: Number(e.target.value) } : null)}
-                                className="w-24 px-2 py-1 text-sm border border-violet-300 rounded focus:ring-2 focus:ring-violet-400 outline-none bg-white/80"
+                                value={editFormData?.vendorQuote ?? row.vendorQuote}
+                                onChange={(e) => setEditFormData({
+                                  item: row.item,
+                                  vendorQuote: Number(e.target.value) || 0,
+                                  aiEstimate: row.aiEstimate
+                                })}
+                                className="w-32 p-2 text-sm border border-violet-300 rounded-xl focus:ring-2 focus:ring-violet-400 outline-none shadow-sm"
+                                autoFocus
                               />
                             </div>
                           ) : (
@@ -240,20 +292,10 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
                           )}
                         </td>
                         <td className="p-4">
-                          {editingRowItem === row.item ? (
-                            <div className="flex items-center gap-1">
-                              <span className="text-slate-500">$</span>
-                              <input
-                                type="number"
-                                value={editFormData?.aiEstimate || 0}
-                                onChange={(e) => setEditFormData(prev => prev ? { ...prev, aiEstimate: Number(e.target.value) } : null)}
-                                className="w-24 px-2 py-1 text-sm border border-emerald-300 rounded focus:ring-2 focus:ring-emerald-400 outline-none bg-white/80"
-                              />
-                            </div>
-                          ) : (
+                          {!row.isGroup ? (
                             <button
                               type="button"
-                              onClick={() => handleSelectPhase2AnalysisItem(row)}
+                              onClick={() => handleSelectPhase2AnalysisItem(row as Phase2AlignedRow)}
                               disabled={isPhase2AnalysisLoading}
                               className={cn('text-left rounded-lg transition-colors cursor-pointer', selectedAnalysisItem?.item === row.item ? 'bg-emerald-50/80' : 'hover:bg-slate-50')}
                               title="點擊查看分析"
@@ -263,6 +305,10 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
                               </div>
                               <div className="text-[11px] text-slate-400 mt-1 italic">點擊查看分析</div>
                             </button>
+                          ) : (
+                            <div className="font-mono text-emerald-700 font-semibold">
+                              ${row.aiEstimate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
                           )}
                         </td>
                         <td className={cn('p-4 font-mono font-bold', row.varianceAmount > 0 ? 'text-red-600' : row.varianceAmount < 0 ? 'text-emerald-600' : 'text-slate-600')}>
@@ -271,53 +317,96 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
                         <td className="p-4 font-mono text-slate-700">
                           {row.variancePercent !== null ? `${row.variancePercent > 0 ? '+' : ''}${row.variancePercent.toFixed(1)}%` : '—'}
                         </td>
-                        <td className="p-4">
-                          <div className="flex flex-col gap-2">
-                            <div className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">[{row.groupId}] {row.groupName}</div>
-                            <div className="flex gap-1 items-center">
-                              <input
-                                type="number"
-                                min="1"
-                                value={row.groupId}
-                                onChange={(e) => updateRowGrouping(row.item, parseInt(e.target.value) || 1, row.groupName)}
-                                className="w-12 px-2 py-1 text-xs border border-slate-300 rounded text-center focus:ring-2 focus:ring-violet-400 outline-none"
-                              />
-                              <input
-                                type="text"
-                                value={row.groupName}
-                                onChange={(e) => updateRowGrouping(row.item, row.groupId, e.target.value)}
-                                placeholder="分類名稱"
-                                className="flex-1 px-2 py-1 text-xs border border-slate-300 rounded focus:ring-2 focus:ring-violet-400 outline-none"
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <button
-                            onClick={() => toggleNegotiationForm(row.item)}
-                            className={cn('px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1', isExpanded ? 'bg-violet-100 text-violet-700 hover:bg-violet-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}
-                          >
-                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                            {negotiationRecord ? '編輯議價' : '開始議價'}
-                          </button>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            {editingRowItem === row.item ? (
-                              <>
-                                <button onClick={() => { if (editFormData) handleEditPhase2Row(row.item, { ...row, ...editFormData }); setEditingRowItem(null); setEditFormData(null); }} className="p-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-lg transition-colors"><Save size={16} /></button>
-                                <button onClick={() => { setEditingRowItem(null); setEditFormData(null); }} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"><X size={16} /></button>
-                              </>
-                            ) : (
-                              <>
-                                <button onClick={() => { setEditingRowItem(row.item); setEditFormData({ item: row.item, vendorQuote: row.vendorQuote, aiEstimate: row.aiEstimate }); }} className="p-1.5 bg-violet-50 text-violet-600 hover:bg-violet-100 rounded-lg transition-colors"><Edit2 size={16} /></button>
-                                <button onClick={() => { if (window.confirm('確定要刪除此細項嗎？')) handleDeletePhase2Row(row.item); }} className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors"><Trash2 size={16} /></button>
-                              </>
-                            )}
-                          </div>
-                        </td>
+                        {!isGroupView && (
+                          <>
+                            <td className="p-4">
+                              <div className="flex flex-col gap-2">
+                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">[{row.groupId}] {row.groupName}</div>
+                                <div className="flex gap-1 items-center">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={row.groupId}
+                                    onChange={(e) => updateRowGrouping(row.item, parseInt(e.target.value) || 1, row.groupName)}
+                                    className="w-10 p-1 text-[10px] border border-slate-200 rounded text-center outline-none focus:border-violet-400"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={row.groupName}
+                                    onChange={(e) => updateRowGrouping(row.item, row.groupId, e.target.value)}
+                                    placeholder="分類名稱"
+                                    className="flex-1 p-1 text-[10px] border border-slate-200 rounded outline-none focus:border-violet-400"
+                                  />
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <button
+                                onClick={() => toggleNegotiationForm(row.item)}
+                                className={cn('px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1', isExpanded ? 'bg-violet-100 text-violet-700 hover:bg-violet-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}
+                              >
+                                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                {negotiationRecord ? '編輯議價' : '開始議價'}
+                              </button>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                {editingRowItem === row.item ? (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        if (editFormData) handleEditPhase2Row(row.item, 'vendorQuote', editFormData.vendorQuote);
+                                        setEditingRowItem(null);
+                                        setEditFormData(null);
+                                      }}
+                                      className="p-2 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-lg transition-colors"
+                                      title="儲存"
+                                    >
+                                      <Save size={16} />
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setEditingRowItem(null);
+                                        setEditFormData(null);
+                                      }}
+                                      className="p-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+                                      title="取消"
+                                    >
+                                      <X size={16} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setEditingRowItem(row.item);
+                                        setEditFormData({ item: row.item, vendorQuote: row.vendorQuote, aiEstimate: row.aiEstimate });
+                                      }}
+                                      className="p-2 bg-violet-50 text-violet-600 hover:bg-violet-100 rounded-lg transition-colors"
+                                      title="編輯"
+                                    >
+                                      <Edit2 size={16} />
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (window.confirm('確定要移除此報價細項嗎？')) {
+                                          handleDeletePhase2Row(row.item);
+                                        }
+                                      }}
+                                      className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                                      title="刪除"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </>
+                        )}
+                        {isGroupView && <td colSpan={3} className="p-4 text-xs italic text-slate-400">合併檢視模式（不可編輯）</td>}
                       </tr>
-                      {isExpanded && (
+                      {!isGroupView && isExpanded && (
                         <tr className="bg-violet-50/30">
                           <td colSpan={8} className="p-4">
                             <NegotiationForm
@@ -333,13 +422,15 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
                   );
                 })}
                 <tr className="bg-gradient-to-r from-slate-700 to-slate-800 text-white font-black text-base border-t-2 border-slate-600">
-                  <td className="p-4 rounded-bl-2xl">總計</td>
+                  <td className="p-4 rounded-bl-2xl">總計金額</td>
                   <td className="p-4 font-mono">${phase2.alignedRows.reduce((sum, row) => sum + row.vendorQuote, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td className="p-4 font-mono">${phase2.alignedRows.reduce((sum, row) => sum + row.aiEstimate, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td className={cn('p-4 font-mono', phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0) > 0 ? 'text-red-300' : 'text-emerald-300')}>
                     {phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0) > 0 ? '+' : ''}${phase2.alignedRows.reduce((sum, row) => sum + row.varianceAmount, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td colSpan={3} className="p-4 rounded-br-2xl text-slate-300">廠商 vs AI 總差異</td>
+                  <td colSpan={isGroupView ? 2 : 4} className="p-4 rounded-br-2xl text-slate-300 text-xs italic">
+                    {isGroupView ? '分類合併總覽' : '廠商 vs AI 報價差異總結'}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -351,7 +442,7 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
         <div className="mb-8 bg-white border border-violet-200 rounded-2xl p-6 shadow-md">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-lg font-black text-violet-900 flex items-center gap-2"><Bot className="w-5 h-5" />議價專屬 AI 助理</h4>
-            <button onClick={regenerateNegotiationStrategy} disabled={isPhase2Negotiating} className="btn-violet">
+            <button onClick={() => regenerateNegotiationStrategy()} disabled={isPhase2Negotiating} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 text-white hover:bg-violet-700 transition-all">
               {isPhase2Negotiating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}產生/更新談判策略
             </button>
           </div>
@@ -367,8 +458,8 @@ export const Phase2Comparison: React.FC<Phase2ComparisonProps> = ({
             ))}
           </div>
           <div className="flex gap-2">
-            <input type="text" value={phase2ChatInput} onChange={(e) => setPhase2ChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handlePhase2ChatMessage()} placeholder="詢問議價相關問題..." className="flex-1 input-base" disabled={isPhase2ChatLoading} />
-            <button onClick={handlePhase2ChatMessage} disabled={!phase2ChatInput.trim() || isPhase2ChatLoading} className="btn-violet px-6"><Send size={16} />發送</button>
+            <input type="text" value={phase2ChatInput} onChange={(e) => setPhase2ChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handlePhase2ChatMessage()} placeholder="詢問議價相關問題..." className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-400" disabled={isPhase2ChatLoading} />
+            <button onClick={() => handlePhase2ChatMessage()} disabled={!phase2ChatInput.trim() || isPhase2ChatLoading} className="inline-flex items-center gap-2 px-6 py-2 rounded-xl text-xs font-bold bg-violet-600 text-white hover:bg-violet-700 transition-all"><Send size={16} />發送</button>
           </div>
         </div>
       )}

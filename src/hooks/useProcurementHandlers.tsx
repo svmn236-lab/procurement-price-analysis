@@ -2,20 +2,20 @@ import React, { useState, useRef, useMemo, useCallback } from "react";
 import html2canvas from "html2canvas";
 import * as XLSX from "xlsx";
 import { MessageSquare } from "lucide-react";
-import { 
-  Vendor, CostItem, ConsolidatedSpec, CostHistoryEntry, 
-  AlternativeProduct, RecommendedVendor, Phase2State, Phase2AlignedRow, 
+import {
+  Vendor, CostItem, ConsolidatedSpec, CostHistoryEntry,
+  AlternativeProduct, RecommendedVendor, Phase2State, Phase2AlignedRow,
   NegotiationRecord, SavedProject, HistoryExcelRow, Phase3State, VendorPdfLineItem
 } from "@/types/procurement";
 import { INITIAL_VENDORS } from "@/lib/constants";
 import * as actions from "@/actions/aiActions";
 
 export function useProcurementHandlers(states: any, calculations: any) {
-const { 
-    activeTab, setActiveTab, strategy, setStrategy, itemName, setItemName, isItemModalOpen, setIsItemModalOpen, itemChatMessages, setItemChatMessages, itemChatInput, setItemChatInput, isItemChatLoading, setIsItemChatLoading, proposedItemDescription, setProposedItemDescription, confirmedItemDescription, setConfirmedItemDescription, projectName, setProjectName, showProjectDetails, setShowProjectDetails, showProcurementInputs, setShowProcurementInputs, docNumber, setDocNumber, department, setDepartment, section, setSection, applicant, setApplicant, budgetAmount, setBudgetAmount, handlingSection, setHandlingSection, handler, setHandler, totalQty, setTotalQty, vendors, setVendors, aiInsights, setAiInsights, isAnalyzing, setIsAnalyzing, specFile, setSpecFile, aiEstimatedPrice, setAiEstimatedPrice, costBreakdown, setCostBreakdown, showBreakdown, setShowBreakdown, showAiInsights, setShowAiInsights, supplementarySpecs, setSupplementarySpecs, quoteTimeframe, setQuoteTimeframe, consolidatedSpecs, setConsolidatedSpecs, isConsolidating, setIsConsolidating, showSpecSummary, setShowSpecSummary, isSpecsConfirmed, setIsSpecsConfirmed, consolidationError, setConsolidationError, editingSpecIndex, setEditingSpecIndex, editingContent, setEditingContent, activeChatId, setActiveChatId, chatMessages, setChatMessages, chatInput, setChatInput, isChatLoading, setIsChatLoading, overallChatMessages, setOverallChatMessages, overallChatInput, setOverallChatInput, isOverallChatLoading, setIsOverallChatLoading, showOverallChat, setShowOverallChat, costHistory, setCostHistory, showDiffModal, setShowDiffModal, expandedDiffId, setExpandedDiffId, diffExplanations, setDiffExplanations, showVendorSection, setShowVendorSection, savedProjects, setSavedProjects, showSavedProjectsModal, setShowSavedProjectsModal, currentProjectId, setCurrentProjectId, historyFeedback, setHistoryFeedback, alternatives, setAlternatives, showAlternativesModal, setShowAlternativesModal, isFetchingAlternatives, setIsFetchingAlternatives, recommendedVendors, setRecommendedVendors, showRecommendedVendorsModal, setShowRecommendedVendorsModal, isFetchingRecommendedVendors, setIsFetchingRecommendedVendors, phase2, setPhase2, phase2Error, setPhase2Error, isPhase2Parsing, setIsPhase2Parsing, isPhase2Aligning, setIsPhase2Aligning, isPhase2Negotiating, setIsPhase2Negotiating, selectedAnalysisItem, setSelectedAnalysisItem, phase2AnalysisError, setPhase2AnalysisError, isPhase2AnalysisLoading, setIsPhase2AnalysisLoading, phase3, setPhase3, expandedNegotiationItems, setExpandedNegotiationItems, isPhase2ChatLoading, setIsPhase2ChatLoading, phase2ChatInput, setPhase2ChatInput, vendorPdfInputRef, appRef, confirmedItemRef, aiInsightsRef, historyImportRef 
+  const {
+    activeTab, setActiveTab, strategy, setStrategy, itemName, setItemName, isItemModalOpen, setIsItemModalOpen, itemChatMessages, setItemChatMessages, itemChatInput, setItemChatInput, isItemChatLoading, setIsItemChatLoading, proposedItemDescription, setProposedItemDescription, confirmedItemDescription, setConfirmedItemDescription, projectName, setProjectName, showProjectDetails, setShowProjectDetails, showProcurementInputs, setShowProcurementInputs, docNumber, setDocNumber, department, setDepartment, section, setSection, applicant, setApplicant, budgetAmount, setBudgetAmount, handlingSection, setHandlingSection, handler, setHandler, totalQty, setTotalQty, vendors, setVendors, aiInsights, setAiInsights, isAnalyzing, setIsAnalyzing, specFile, setSpecFile, aiEstimatedPrice, setAiEstimatedPrice, costBreakdown, setCostBreakdown, showBreakdown, setShowBreakdown, showAiInsights, setShowAiInsights, supplementarySpecs, setSupplementarySpecs, quoteTimeframe, setQuoteTimeframe, consolidatedSpecs, setConsolidatedSpecs, isConsolidating, setIsConsolidating, showSpecSummary, setShowSpecSummary, isSpecsConfirmed, setIsSpecsConfirmed, consolidationError, setConsolidationError, editingSpecIndex, setEditingSpecIndex, editingContent, setEditingContent, activeChatId, setActiveChatId, chatMessages, setChatMessages, chatInput, setChatInput, isChatLoading, setIsChatLoading, overallChatMessages, setOverallChatMessages, overallChatInput, setOverallChatInput, isOverallChatLoading, setIsOverallChatLoading, showOverallChat, setShowOverallChat, costHistory, setCostHistory, showDiffModal, setShowDiffModal, expandedDiffId, setExpandedDiffId, diffExplanations, setDiffExplanations, showVendorSection, setShowVendorSection, savedProjects, setSavedProjects, showSavedProjectsModal, setShowSavedProjectsModal, currentProjectId, setCurrentProjectId, historyFeedback, setHistoryFeedback, alternatives, setAlternatives, showAlternativesModal, setShowAlternativesModal, isFetchingAlternatives, setIsFetchingAlternatives, recommendedVendors, setRecommendedVendors, showRecommendedVendorsModal, setShowRecommendedVendorsModal, isFetchingRecommendedVendors, setIsFetchingRecommendedVendors, phase2, setPhase2, phase2Error, setPhase2Error, isPhase2Parsing, setIsPhase2Parsing, isPhase2Aligning, setIsPhase2Aligning, isPhase2Negotiating, setIsPhase2Negotiating, selectedAnalysisItem, setSelectedAnalysisItem, phase2AnalysisError, setPhase2AnalysisError, isPhase2AnalysisLoading, setIsPhase2AnalysisLoading, phase3, setPhase3, expandedNegotiationItems, setExpandedNegotiationItems, isPhase2ChatLoading, setIsPhase2ChatLoading, phase2ChatInput, setPhase2ChatInput, vendorPdfInputRef, appRef, confirmedItemRef, aiInsightsRef, historyImportRef
   } = states;
-  const { 
-    activeCostItem, stats, chartData 
+  const {
+    activeCostItem, stats, chartData
   } = calculations;
 
   // 議價表單組件
@@ -115,15 +115,15 @@ const {
 
   const handleAddVendor = () => {
     const newId = Math.random().toString(36).substr(2, 9);
-    setVendors(prev => [...prev, { id: newId, name: '', price: 0 }]);
+    setVendors((prev: Vendor[]) => [...prev, { id: newId, name: '', price: 0 }]);
   };
 
   const handleRemoveVendor = (id: string) => {
-    setVendors(prev => prev.filter(v => v.id !== id));
+    setVendors((prev: Vendor[]) => prev.filter((v: Vendor) => v.id !== id));
   };
 
   const handleVendorChange = (id: string, field: keyof Vendor, value: string | number) => {
-    setVendors(prev => prev.map(v => v.id === id ? { ...v, [field]: value } : v));
+    setVendors((prev: Vendor[]) => prev.map((v: Vendor) => v.id === id ? { ...v, [field]: value } : v));
   };
 
   const handleClearAll = () => {
@@ -215,10 +215,10 @@ const {
 
   const saveCurrentProject = (desc?: string, overrides?: Partial<SavedProject>) => {
     const projectId = currentProjectId || Date.now().toString();
-    setSavedProjects(prev => {
+    setSavedProjects((prev: SavedProject[]) => {
       const projectToSave = buildProjectSnapshot(projectId, desc, overrides);
 
-      const existingIndex = prev.findIndex(p => p.id === projectId);
+      const existingIndex = prev.findIndex((p: SavedProject) => p.id === projectId);
       if (existingIndex >= 0) {
         const newProjects = [...prev];
         newProjects[existingIndex] = projectToSave;
@@ -263,7 +263,7 @@ const {
 
   const getCurrentOrLatestProject = () => {
     if (currentProjectId) {
-      const existing = savedProjects.find(p => p.id === currentProjectId);
+      const existing = savedProjects.find((p: SavedProject) => p.id === currentProjectId);
       if (existing) return existing;
     }
     return buildProjectSnapshot(currentProjectId || Date.now().toString());
@@ -271,13 +271,13 @@ const {
 
   const exportHistoryAsExcel = () => {
     const currentSnapshot = getCurrentOrLatestProject();
-    const mergedProjects = [currentSnapshot, ...savedProjects.filter(p => p.id !== currentSnapshot.id)].slice(0, 50);
+    const mergedProjects = [currentSnapshot, ...savedProjects.filter((p: SavedProject) => p.id !== currentSnapshot.id)].slice(0, 50);
 
     const rows: HistoryExcelRow[] = mergedProjects.map((project) => {
       const strategy =
         project.costBreakdown
           .slice(0, 3)
-          .map((item) => `${item.item}: ${item.basis}`)
+          .map((item: CostItem) => `${item.item}: ${item.basis}`)
           .join(' | ') || '無';
 
       return {
@@ -449,16 +449,16 @@ const {
 
   const getHistoricalLearningContext = () => {
     const candidates = savedProjects
-      .filter(p => p.id !== currentProjectId && (p.aiInsights?.trim() || p.costBreakdown.length > 0))
-      .sort((a, b) => b.timestamp - a.timestamp)
+      .filter((p: SavedProject) => p.id !== currentProjectId && (p.aiInsights?.trim() || p.costBreakdown.length > 0))
+      .sort((a: SavedProject, b: SavedProject) => b.timestamp - a.timestamp)
       .slice(0, 3);
 
     if (candidates.length === 0) return '';
 
-    const context = candidates.map((p, idx) => {
+    const context = candidates.map((p: SavedProject, idx: number) => {
       const keyBreakdown = p.costBreakdown
         .slice(0, 3)
-        .map(b => `${b.item}: ${b.basis} / ${b.explanation}`)
+        .map((b: CostItem) => `${b.item}: ${b.basis} / ${b.explanation}`)
         .join('\n');
       return [
         `案例 ${idx + 1}：${p.projectName}（${new Date(p.timestamp).toLocaleDateString()}）`,
@@ -470,10 +470,15 @@ const {
     }).join('\n\n');
 
     return `
+      【重要決策基準：權重校正指令】
+      1. 請優先參照時間戳記最接近現在的「歷史案例」。
+      2. 歷史案例中的「談判/風險重點」與「議價邏輯」代表了實際市場的回饋數據，其權重應高於理論成本拆解。
+      3. 若近期案例顯示某項成本在議價後有明顯下修或上浮趨勢，請在本次 Should-cost 估算中反映該權重調整。
+
       Historical Learning Context (from prior successful analyses):
       ${context}
 
-      Please reuse applicable judgement criteria and negotiation logic from these cases, but adapt to current specs and market timeframe.
+      Please prioritize the most recent historical entries above when determining Should-cost weights. Adapt to current specs but ensure real-world negotiation feedback from recent cases heavily influences the outcome.
     `;
   };
 
@@ -481,32 +486,32 @@ const {
     if (!appRef.current) return;
     try {
       const originalInputs = Array.from(appRef.current.querySelectorAll('input, textarea')) as (HTMLInputElement | HTMLTextAreaElement)[];
-      
-      const canvas = await html2canvas(appRef.current, { 
-        scale: 2, 
+
+      const canvas = await html2canvas(appRef.current, {
+        scale: 2,
         useCORS: true,
         onclone: (clonedDoc) => {
           const clonedApp = clonedDoc.querySelector('.min-h-screen');
           if (!clonedApp) return;
-          
+
           const clonedInputs = Array.from(clonedApp.querySelectorAll('input, textarea')) as (HTMLInputElement | HTMLTextAreaElement)[];
-          
+
           clonedInputs.forEach((clonedInput, index) => {
             const originalInput = originalInputs[index];
             if (!originalInput) return;
-            
+
             const isTextarea = clonedInput.tagName.toLowerCase() === 'textarea';
-            const isTextInput = clonedInput.tagName.toLowerCase() === 'input' && 
+            const isTextInput = clonedInput.tagName.toLowerCase() === 'input' &&
               ((clonedInput as HTMLInputElement).type === 'text' || (clonedInput as HTMLInputElement).type === 'number');
-              
+
             if (isTextInput || isTextarea) {
               const div = clonedDoc.createElement('div');
               const value = originalInput.value;
               const placeholder = originalInput.placeholder;
-              
+
               div.innerText = value || placeholder;
               div.className = clonedInput.className;
-              
+
               const computedStyle = window.getComputedStyle(originalInput);
               div.style.boxSizing = 'border-box';
               div.style.height = computedStyle.height;
@@ -521,7 +526,7 @@ const {
               div.style.borderRadius = computedStyle.borderRadius;
               div.style.backgroundColor = computedStyle.backgroundColor;
               div.style.overflow = 'hidden';
-              
+
               if (isTextInput) {
                 div.style.display = 'flex';
                 div.style.alignItems = 'center';
@@ -529,7 +534,7 @@ const {
               } else {
                 div.style.whiteSpace = 'pre-wrap';
               }
-              
+
               clonedInput.parentNode?.replaceChild(div, clonedInput);
             }
           });
@@ -565,8 +570,8 @@ const {
   };
 
   const handleSetAdopted = (entry: CostHistoryEntry) => {
-    setCostHistory(prev => {
-      const newHistory = prev.filter(e => e.id !== entry.id);
+    setCostHistory((prev: CostHistoryEntry[]) => {
+      const newHistory = prev.filter((e: CostHistoryEntry) => e.id !== entry.id);
       return [entry, ...newHistory];
     });
     setAiInsights(entry.aiInsights);
@@ -580,43 +585,43 @@ const {
       return;
     }
     setExpandedDiffId(oldEntry.id);
-    
+
     if (diffExplanations[oldEntry.id]) return;
 
-    setDiffExplanations(prev => ({ ...prev, [oldEntry.id]: { loading: true, text: '' } }));
-    
+    setDiffExplanations((prev: Record<string, { loading: boolean; text: string }>) => ({ ...prev, [oldEntry.id]: { loading: true, text: '' } }));
+
     try {
       const newest = costHistory[0];
       const explanation = await actions.generateDiffAnalysisAction(newest, oldEntry);
 
-      setDiffExplanations(prev => ({ 
-        ...prev, 
-        [oldEntry.id]: { loading: false, text: explanation || '無法產生差異分析。' } 
+      setDiffExplanations((prev: any) => ({
+        ...prev,
+        [oldEntry.id]: { loading: false, text: explanation || '無法產生差異分析。' }
       }));
     } catch (error) {
       console.error('Diff Analysis Error:', error);
-      setDiffExplanations(prev => ({ 
-        ...prev, 
-        [oldEntry.id]: { loading: false, text: '產生差異分析時發生錯誤，請稍後再試。' } 
+      setDiffExplanations((prev: any) => ({
+        ...prev,
+        [oldEntry.id]: { loading: false, text: '產生差異分析時發生錯誤，請稍後再試。' }
       }));
     }
   };
 
   const handleDeleteHistoryEntry = (id: string) => {
-    setCostHistory(prev => prev.filter(entry => entry.id !== id));
+    setCostHistory((prev: CostHistoryEntry[]) => prev.filter((entry: CostHistoryEntry) => entry.id !== id));
     if (expandedDiffId === id) {
       setExpandedDiffId(null);
     }
   };
 
-  const handleAddSpec = () => setSupplementarySpecs(prev => [...prev, '']);
+  const handleAddSpec = () => setSupplementarySpecs((prev: string[]) => [...prev, '']);
 
   const handleRemoveSpec = (index: number) => {
-    setSupplementarySpecs(prev => prev.filter((_, i) => i !== index));
+    setSupplementarySpecs((prev: string[]) => prev.filter((_: string, i: number) => i !== index));
   };
 
   const handleSpecChange = (index: number, value: string) => {
-    setSupplementarySpecs(prev => {
+    setSupplementarySpecs((prev: any) => {
       const newSpecs = [...prev];
       newSpecs[index] = value;
       return newSpecs;
@@ -628,17 +633,22 @@ const {
     setEditingContent(content);
   };
 
-  const saveEditing = async (index: number) => {
+  const saveEditing = async () => {
+    if (editingSpecIndex === null) return;
     const newSpecs = [...consolidatedSpecs];
-    newSpecs[index].content = editingContent;
+    newSpecs[editingSpecIndex].content = editingContent;
+    newSpecs[editingSpecIndex].hasContradiction = false; // Reset contradiction flag after edit
     setConsolidatedSpecs(newSpecs);
     setEditingSpecIndex(null);
-    
-    // Automatic re-extraction can be triggered here if needed, but keeping it manual to save quota
   };
 
   const cancelEditing = () => {
     setEditingSpecIndex(null);
+  };
+
+  const handleConfirmSpecs = () => {
+    setIsSpecsConfirmed(true);
+    setShowSpecSummary(false);
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -661,18 +671,18 @@ const {
     setIsConsolidating(true);
     setIsSpecsConfirmed(false);
     setConsolidationError(null);
-    
+
     try {
       let base64Data: string | null = null;
       let mimeType: string | null = null;
-      
+
       if (specFile) {
         base64Data = await fileToBase64(specFile);
         mimeType = specFile.type || 'application/pdf';
       }
-      
-      const suppSpecsText = supplementarySpecs.filter(s => s.trim()).map((s, i) => `${i + 1}. ${s}`).join('\n');
-      
+
+      const suppSpecsText = supplementarySpecs.filter((s: any) => s.trim()).map((s: any, i: number) => `${i + 1}. ${s}`).join('\n');
+
       const data = await actions.consolidateSpecsAction(
         base64Data,
         mimeType,
@@ -754,17 +764,17 @@ const {
   };
 
   const toggleNegotiationForm = (item: string) => {
-    setExpandedNegotiationItems(prev =>
+    setExpandedNegotiationItems((prev: string[]) =>
       prev.includes(item)
-        ? prev.filter(i => i !== item)
+        ? prev.filter((i: string) => i !== item)
         : [...prev, item]
     );
   };
 
   const saveNegotiationRecord = (record: NegotiationRecord) => {
-    setPhase2(prev => {
+    setPhase2((prev: any) => {
       if (!prev) return prev;
-      const existingIndex = prev.negotiationRecords?.findIndex(r => r.item === record.item) ?? -1;
+      const existingIndex = prev.negotiationRecords?.findIndex((r: NegotiationRecord) => r.item === record.item) ?? -1;
       const newRecords = [...(prev.negotiationRecords || [])];
 
       if (existingIndex >= 0) {
@@ -777,13 +787,13 @@ const {
       saveCurrentProject(undefined, { phase2: updatedPhase2 });
       return updatedPhase2;
     });
-    setExpandedNegotiationItems(prev => prev.filter(i => i !== record.item));
+    setExpandedNegotiationItems((prev: string[]) => prev.filter((i: string) => i !== record.item));
   };
 
   const updateRowGrouping = (item: string, groupId: number, groupName: string) => {
-    setPhase2(prev => {
+    setPhase2((prev: any) => {
       if (!prev) return prev;
-      const updatedRows = prev.alignedRows.map(r =>
+      const updatedRows = prev.alignedRows.map((r: Phase2AlignedRow) =>
         r.item === item ? { ...r, groupId, groupName } : r
       );
       const updatedPhase2 = { ...prev, alignedRows: updatedRows };
@@ -792,11 +802,13 @@ const {
     });
   };
 
-  const handleEditPhase2Row = (oldItemName: string, updatedRow: Phase2AlignedRow) => {
-    setPhase2(prev => {
+  const handleEditPhase2Row = (itemName: string, field: string, value: any) => {
+    setPhase2((prev: any) => {
       if (!prev) return prev;
-      const updatedRows = prev.alignedRows.map(r => {
-        if (r.item === oldItemName) {
+      const updatedRows = prev.alignedRows.map((r: any) => {
+        if (r.item === itemName) {
+          const updatedRow = { ...r, [field]: value };
+          // 重新計算差異
           const aiEst = updatedRow.aiEstimate || 0;
           const diff = updatedRow.vendorQuote - aiEst;
           return {
@@ -813,10 +825,19 @@ const {
     });
   };
 
-  const handleDeletePhase2Row = (itemName: string) => {
-    setPhase2(prev => {
+  const handlePhase2QuoteVersionChange = (version: string) => {
+    setPhase2((prev: any) => {
       if (!prev) return prev;
-      const updatedRows = prev.alignedRows.filter(r => r.item !== itemName);
+      const updatedPhase2 = { ...prev, quoteVersion: version };
+      saveCurrentProject(undefined, { phase2: updatedPhase2 });
+      return updatedPhase2;
+    });
+  };
+
+  const handleDeletePhase2Row = (itemName: string) => {
+    setPhase2((prev: any) => {
+      if (!prev) return prev;
+      const updatedRows = prev.alignedRows.filter((r: any) => r.item !== itemName);
       const updatedPhase2 = { ...prev, alignedRows: updatedRows };
       saveCurrentProject(undefined, { phase2: updatedPhase2 });
       return updatedPhase2;
@@ -841,13 +862,13 @@ const {
       const systemPrompt = `你是一位專業的採購議價顧問。目前正在討論購案「${confirmedItemDescription || itemName}」的廠商報價分析。`;
 
       const aiReply = await actions.handleChatMessageAction(
-        phase2.phase2ChatMessages?.map(m => ({ role: m.role as 'user' | 'model', text: m.text })) || [],
+        phase2.phase2ChatMessages?.map((m: any) => ({ role: m.role as 'user' | 'model', text: m.text })) || [],
         userMessage,
         JSON.stringify(contextData),
         systemPrompt
       );
 
-      setPhase2(prev => {
+      setPhase2((prev: any) => {
         if (!prev) return prev;
         const newMessages: Phase2State['phase2ChatMessages'] = [
           ...(prev.phase2ChatMessages || []),
@@ -867,7 +888,7 @@ const {
         errorMessage = 'API 請求次數已達上限 (Quota Exceeded)。請稍後再試，或檢查您的 API Key 額度。';
       }
 
-      setPhase2(prev => {
+      setPhase2((prev: any) => {
         if (!prev) return prev;
         const newMessages: Phase2State['phase2ChatMessages'] = [
           ...(prev.phase2ChatMessages || []),
@@ -906,11 +927,11 @@ const {
       result.consultantAnalysis || '（未取得市場洞察與顧問建議）',
     ].join('\n');
 
-    return { 
-      category: result.category || '未分類', 
-      calculationLogic: result.calculationLogic || '', 
-      consultantAnalysis: result.consultantAnalysis || '', 
-      assistantReply 
+    return {
+      category: result.category || '未分類',
+      calculationLogic: result.calculationLogic || '',
+      consultantAnalysis: result.consultantAnalysis || '',
+      assistantReply
     };
   };
 
@@ -922,15 +943,15 @@ const {
 
   const handleBatchGeneratePhase2Analysis = async () => {
     if (!phase2) return;
-    
+
     // 鎖定狀態防止重複觸發
     setIsPhase2AnalysisLoading(true);
     setPhase2AnalysisError(null);
 
     try {
       // 選取所有尚未有分析結果的細項 (或您可以根據需求改為 phase2.alignedRows 直接全數重刷)
-      const itemsToAnalyze = phase2.alignedRows.filter(r => !r.calculationLogic?.trim() || !r.consultantAnalysis?.trim());
-      
+      const itemsToAnalyze = phase2.alignedRows.filter((r: any) => !r.calculationLogic?.trim() || !r.consultantAnalysis?.trim());
+
       if (itemsToAnalyze.length === 0) {
         setIsPhase2AnalysisLoading(false);
         return;
@@ -946,9 +967,9 @@ const {
         quoteTimeframe || '未指定'
       );
 
-      setPhase2(prev => {
+      setPhase2((prev: any) => {
         if (!prev) return prev;
-        const newRows = prev.alignedRows.map(row => {
+        const newRows = prev.alignedRows.map((row: any) => {
           const result = results.find((res: any) => res.item === row.item);
           if (result) {
             return {
@@ -976,11 +997,11 @@ const {
       console.error('Batch analysis error:', error);
       const message = error instanceof Error ? error.message : '';
       let errorMessage = '批次分析失敗，請稍後重試。';
-      
+
       if (message.includes('429') || message.includes('quota') || message.includes('RESOURCE_EXHAUSTED')) {
         errorMessage = 'API 請求次數限制 (429 Quota Exceeded)。系統已執行真・批次優化，請稍候片刻再試。';
       }
-      
+
       setPhase2AnalysisError(errorMessage);
     } finally {
       setIsPhase2AnalysisLoading(false);
@@ -997,7 +1018,7 @@ const {
         phase2.negotiationRecords || []
       );
 
-      setPhase2(prev => {
+      setPhase2((prev: any) => {
         if (!prev) return prev;
         const updatedPhase2 = { ...prev, negotiationStrategy: newStrategy };
         saveCurrentProject(undefined, { phase2: updatedPhase2 });
@@ -1021,7 +1042,7 @@ const {
   ) => {
     if (targetItems.length === 0) return;
 
-    setPhase3(prev => ({ ...prev, isGeneratingJustification: true }));
+    setPhase3((prev: any) => ({ ...prev, isGeneratingJustification: true }));
     try {
       const newJustifications = await actions.generateCostJustificationAction(
         targetItems,
@@ -1029,7 +1050,7 @@ const {
         confirmedItemDescription || itemName
       );
 
-      setPhase3(prev => ({
+      setPhase3((prev: any) => ({
         ...prev,
         justifications: { ...prev.justifications, ...newJustifications },
         isGeneratingJustification: false
@@ -1037,12 +1058,12 @@ const {
 
     } catch (error) {
       console.error('Generate justification error:', error);
-      setPhase3(prev => ({ ...prev, isGeneratingJustification: false }));
+      setPhase3((prev: any) => ({ ...prev, isGeneratingJustification: false }));
     }
   };
 
   const handleTogglePhase3Merge = async (checked: boolean) => {
-    setPhase3(prev => ({ ...prev, isMerged: checked }));
+    setPhase3((prev: any) => ({ ...prev, isMerged: checked }));
   };
 
   const aggregatePhase3Data = (p2: Phase2State, isMerged: boolean) => {
@@ -1106,10 +1127,10 @@ const {
     if (!file) return;
 
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const isExcel = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
-                    file.type === 'application/vnd.ms-excel' || 
-                    file.name.toLowerCase().endsWith('.xlsx') || 
-                    file.name.toLowerCase().endsWith('.xls');
+    const isExcel = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      file.type === 'application/vnd.ms-excel' ||
+      file.name.toLowerCase().endsWith('.xlsx') ||
+      file.name.toLowerCase().endsWith('.xls');
 
     if (!isPdf && !isExcel) {
       setPhase2Error('請上傳 .pdf 或 .xlsx 格式的報價單。');
@@ -1145,7 +1166,7 @@ const {
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
-        
+
         // 1. 在前端將 Excel 列資料整理成陣列
         const parsedExcelData = rows.slice(1).map(row => {
           if (!Array.isArray(row)) return null;
@@ -1197,21 +1218,21 @@ const {
     try {
       let specsContext = "";
       if (isSpecsConfirmed && consolidatedSpecs.length > 0) {
-        specsContext = "已確認之最終規格 (Confirmed Specifications):\n" + consolidatedSpecs.map((s, i) => `${i + 1}. [${s.category}] ${s.content}`).join('\n');
+        specsContext = "已確認之最終規格 (Confirmed Specifications):\n" + consolidatedSpecs.map((s: any, i: number) => `${i + 1}. [${s.category}] ${s.content}`).join('\n');
       } else {
-        const suppSpecsText = supplementarySpecs.filter(s => s.trim()).map((s, i) => `${i + 1}. ${s}`).join('\n');
+        const suppSpecsText = supplementarySpecs.filter((s: any) => s.trim()).map((s: any, i: number) => `${i + 1}. ${s}`).join('\n');
         specsContext = "補充規格條件 (Supplementary Specifications):\n" + (suppSpecsText || '無');
       }
 
       const data = await actions.runAiAnalysisAction(
         confirmedItemDescription || itemName,
         totalQty,
-        vendors.filter(v => v.price > 0),
+        vendors.filter((v: any) => v.price > 0),
         specsContext,
         quoteTimeframe || '未指定',
         getHistoricalLearningContext()
       );
-      
+
       setAiInsights(data.insights || "無分析建議");
       setAiEstimatedPrice(data.estimatedPrice || stats.minPrice * 0.95);
       setCostBreakdown(data.breakdown || []);
@@ -1225,8 +1246,8 @@ const {
         breakdown: data.breakdown || [],
         aiInsights: data.insights || "無分析建議"
       };
-      
-      setCostHistory(prev => {
+
+      setCostHistory((prev: any[]) => {
         const newHistory = [newEntry, ...prev].slice(0, 5);
         saveCurrentProject(undefined, {
           aiInsights: data.insights || "無分析建議",
@@ -1254,23 +1275,23 @@ const {
   const handleOpenChat = (item: CostItem) => {
     setActiveChatId(item.item);
     setChatMessages([
-      { 
-        role: 'model', 
-        text: `您好！關於「${item.item}」的計算基礎（${item.basis}），您有任何疑問嗎？` 
+      {
+        role: 'model',
+        text: `您好！關於「${item.item}」的計算基礎（${item.basis}），您有任何疑問嗎？`
       }
     ]);
     setChatInput('');
   };
 
   const handleConditionChange = (index: number, value: string) => {
-    setCostBreakdown(prev => prev.map((item, i) => i === index ? { ...item, customCondition: value } : item));
+    setCostBreakdown((prev: any[]) => prev.map((item: any, i: number) => i === index ? { ...item, customCondition: value } : item));
   };
 
   const handleUpdateCostItem = async (index: number) => {
     const itemToUpdate = costBreakdown[index];
     if (!itemToUpdate.customCondition) return;
 
-    setCostBreakdown(prev => prev.map((item, i) => i === index ? { ...item, isUpdating: true } : item));
+    setCostBreakdown((prev: any[]) => prev.map((item: any, i: number) => i === index ? { ...item, isUpdating: true } : item));
     try {
       const context = {
         itemName: confirmedItemDescription || itemName,
@@ -1286,7 +1307,7 @@ const {
       );
 
       const data = result.data || {};
-      setCostBreakdown(prev => {
+      setCostBreakdown((prev: any[]) => {
         const newBreakdown = [...prev];
         newBreakdown[index] = {
           ...newBreakdown[index],
@@ -1301,7 +1322,7 @@ const {
       });
     } catch (error) {
       console.error("Error updating cost item:", error);
-      setCostBreakdown(prev => prev.map((item, i) => i === index ? { ...item, isUpdating: false } : item));
+      setCostBreakdown((prev: any[]) => prev.map((item: any, i: number) => i === index ? { ...item, isUpdating: false } : item));
     }
   };
 
@@ -1313,29 +1334,44 @@ const {
   const handleSendItemChatMessage = async () => {
     if (!itemChatInput.trim()) return;
     const userMessage = itemChatInput.trim();
-    setItemChatMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    setItemChatMessages((prev: any[]) => [...prev, { role: 'user', text: userMessage }]);
     setItemChatInput('');
     setIsItemChatLoading(true);
     try {
       const context = {
         itemName,
-        consolidatedSpecs: consolidatedSpecs.map(s => `[${s.category}] ${s.content}`)
+        consolidatedSpecs: consolidatedSpecs.map((s: any) => `[${s.category}] ${s.content}`)
       };
 
       const result = await actions.handleGenericChatAction(
-        itemChatMessages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', text: m.text })),
+        itemChatMessages.map((m: any) => ({ role: m.role === 'ai' ? 'model' : 'user', text: m.text })),
         userMessage,
         context,
-        `你是一位專業的採購助理。協助釐清品項細節。`
+        `你是一位專業的採購經理助理。你的任務是透過對話釐清使用者想要採購的具體品項規格與用途。
+        
+        請遵循以下規則：
+        1. 詢問關鍵規格（如：尺寸、材質、性能指標、保固要求等）。
+        2. 當你認為資訊已經足夠撰寫出一份專業的「品項規格描述」時，請在 JSON 的 data 欄位中設定 isComplete: true 並提供完整描述在 itemDescription 欄位。
+        3. 即使 isComplete 為 true，你的 text 欄位仍應對使用者進行禮貌的回覆。
+        
+        JSON 格式範例：
+        {
+          "text": "感謝您的說明。我已經根據您的需求整理出一份專業的品項描述...",
+          "data": {
+            "isComplete": true,
+            "itemDescription": "15吋商用高效能筆電 (i7/16G/512G SSD/含三年保固)"
+          }
+        }`
       );
 
-      setItemChatMessages(prev => [...prev, { role: 'ai', text: result.text }]);
+      setItemChatMessages((prev: any[]) => [...prev, { role: 'ai', text: result.text }]);
       if (result.data?.isComplete && result.data?.itemDescription) {
         setProposedItemDescription(result.data.itemDescription);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending item chat message:", error);
-      setItemChatMessages(prev => [...prev, { role: 'ai', text: "抱歉，系統發生錯誤。" }]);
+      const errorMsg = error?.message || "未知錯誤";
+      setItemChatMessages((prev: any[]) => [...prev, { role: 'ai', text: `抱歉，系統發生錯誤：${errorMsg}` }]);
     } finally {
       setIsItemChatLoading(false);
     }
@@ -1345,7 +1381,7 @@ const {
     if (!overallChatInput.trim()) return;
 
     const userMessage = overallChatInput.trim();
-    setOverallChatMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    setOverallChatMessages((prev: any[]) => [...prev, { role: 'user', text: userMessage }]);
     setOverallChatInput('');
     setIsOverallChatLoading(true);
     try {
@@ -1366,10 +1402,10 @@ const {
       );
 
       const data = result.data || {};
-      setOverallChatMessages(prev => [...prev, { role: 'model', text: result.text || data.reply || '抱歉，我現在無法回答。' }]);
+      setOverallChatMessages((prev: any[]) => [...prev, { role: 'model', text: result.text || data.reply || '抱歉，我現在無法回答。' }]);
 
       if (data.shouldUpdateSpecs && data.newSpecs) {
-        setSupplementarySpecs(prev => {
+        setSupplementarySpecs((prev: string[]) => {
           const newSpecs = [...prev];
           if (newSpecs[newSpecs.length - 1] === '') {
             newSpecs[newSpecs.length - 1] = data.newSpecs;
@@ -1391,7 +1427,7 @@ const {
       if (message.includes('429') || message.includes('quota')) {
         errorMessage = 'API 請求次數已達上限。';
       }
-      setOverallChatMessages(prev => [...prev, { role: 'model', text: errorMessage }]);
+      setOverallChatMessages((prev: any[]) => [...prev, { role: 'model', text: errorMessage }]);
     } finally {
       setIsOverallChatLoading(false);
     }
@@ -1400,7 +1436,7 @@ const {
   const handleSendMessage = async () => {
     if (!chatInput.trim() || !activeCostItem) return;
     const userMessage = chatInput.trim();
-    setChatMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    setChatMessages((prev: any[]) => [...prev, { role: 'user', text: userMessage }]);
     setChatInput('');
     setIsChatLoading(true);
     try {
@@ -1417,11 +1453,11 @@ const {
         `你是一位資深的採購專家。請協助回答採購相關問題。`
       );
 
-      setChatMessages(prev => [...prev, { role: 'model', text: result.text || '抱歉，我現在無法回答。' }]);
+      setChatMessages((prev: any[]) => [...prev, { role: 'model', text: result.text || '抱歉，我現在無法回答。' }]);
       if (result.data?.shouldUpdate && result.data?.updatedCost !== undefined) {
-        const index = costBreakdown.findIndex(item => item.item === activeCostItem.item);
+        const index = costBreakdown.findIndex((item: any) => item.item === activeCostItem.item);
         if (index !== -1) {
-          setCostBreakdown(prev => {
+          setCostBreakdown((prev: any[]) => {
             const newBreakdown = [...prev];
             newBreakdown[index] = {
               ...newBreakdown[index],
@@ -1442,30 +1478,30 @@ const {
       if (message.includes('429') || message.includes('quota')) {
         errorMessage = 'API 請求次數已達上限。';
       }
-      setChatMessages(prev => [...prev, { role: 'model', text: errorMessage }]);
+      setChatMessages((prev: any[]) => [...prev, { role: 'model', text: errorMessage }]);
     } finally {
       setIsChatLoading(false);
     }
   };
 
-  return { 
-    NegotiationForm, aggregatePhase3Data, alignCostStructures, buildProjectSnapshot, 
-    cancelEditing, exportHistoryAsExcel, fetchAlternatives, fetchRecommendedVendors, 
-    fileToBase64, generateCostJustification, generatePhase2AnalysisForItem, 
-    generatePhase2NegotiationStrategy, getCommittedPrice, getCurrentOrLatestProject, 
-    getHistoricalLearningContext, handleAddSpec, handleClearAll, handleCompareDiff, 
-    handleConditionChange, handleConsolidateSpecs, handleDeleteHistoryEntry, 
-    handleImportHistoryFile, handleOpenChat, handlePhase2ChatMessage, 
+  return {
+    NegotiationForm, aggregatePhase3Data, alignCostStructures, buildProjectSnapshot,
+    cancelEditing, exportHistoryAsExcel, fetchAlternatives, fetchRecommendedVendors,
+    fileToBase64, generateCostJustification, generatePhase2AnalysisForItem,
+    generatePhase2NegotiationStrategy, getCommittedPrice, getCurrentOrLatestProject,
+    getHistoricalLearningContext, handleAddSpec, handleClearAll, handleCompareDiff,
+    handleConditionChange, handleConsolidateSpecs, handleDeleteHistoryEntry,
+    handleImportHistoryFile, handleOpenChat, handlePhase2ChatMessage,
     handleRemoveSpec, handleRemoveVendor, handleAddVendor, handleVendorChange,
-    handleScreenshot, handleSectionScreenshot, handleSelectPhase2AnalysisItem, 
+    handleScreenshot, handleSectionScreenshot, handleSelectPhase2AnalysisItem,
     handleBatchGeneratePhase2Analysis,
-    handleSendItemChatMessage, handleSendMessage, handleSendOverallChatMessage, 
-    handleSetAdopted, handleSpecChange, handleStartItemClarification, 
-    handleTogglePhase3Merge, handleUpdateCostItem, handleVendorQuotePdfSelected, 
-    handleEditPhase2Row, handleDeletePhase2Row,
-    loadProject, normalizeImportedProject, parseJsonCell, parseVendorQuotePdfWithGemini, 
-    regenerateAllPhase3Justifications, regenerateNegotiationStrategy, 
-    runAiAnalysis, saveCurrentProject, saveEditing, saveNegotiationRecord, 
-    startEditing, toggleNegotiationForm, updateRowGrouping 
+    handleSendItemChatMessage, handleSendMessage, handleSendOverallChatMessage,
+    handleSetAdopted, handleSpecChange, handleStartItemClarification,
+    handleTogglePhase3Merge, handleUpdateCostItem, handleVendorQuotePdfSelected,
+    handleEditPhase2Row, handleDeletePhase2Row, handlePhase2QuoteVersionChange,
+    loadProject, normalizeImportedProject, parseJsonCell, parseVendorQuotePdfWithGemini,
+    regenerateAllPhase3Justifications, regenerateNegotiationStrategy,
+    runAiAnalysis, saveCurrentProject, saveEditing, saveNegotiationRecord,
+    startEditing, toggleNegotiationForm, updateRowGrouping, handleConfirmSpecs
   };
 }

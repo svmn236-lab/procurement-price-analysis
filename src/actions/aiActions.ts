@@ -8,7 +8,20 @@ import {
 
 const getGenAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY });
 
-const GEMINI_MODEL = 'gemini-3-flash-preview';
+const GEMINI_MODEL = 'gemini-2.0-flash-lite-001';
+
+function extractJsonObjectFromText(text: string): any {
+  try {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1) {
+      return JSON.parse(text.substring(start, end + 1));
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
 
 /**
  * Utility to extract JSON array from text
@@ -62,7 +75,6 @@ ${JSON.stringify(excelRows, null, 2)}
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json',
       // 強制約定回傳格式，確保絕對不會解析失敗
       responseSchema: {
@@ -138,7 +150,6 @@ ${JSON.stringify(aiContext, null, 2)}
       { text: prompt },
     ],
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -179,7 +190,6 @@ export async function parseVendorQuotePdfAction(base64Pdf: string): Promise<Vend
       { text: '請閱讀附件 PDF 並提取出所有的【成本細項】與對應的【報價金額】。' },
     ],
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       systemInstruction: '你是一個專業的採購稽核員。請直接輸出純 JSON 陣列格式，格式範例：[{"item": "加工費", "amount": 1500}]',
     },
   });
@@ -202,8 +212,12 @@ export async function runAiAnalysisAction(
 現有報價：${JSON.stringify(vendors)}
 ${learningContext}
 
+任務重點：
+1. 【Should-cost 權重校正】：若 learningContext 中包含近期的議價回饋（Negotiation Feedback），請給予該數據最高權重。
+2. 即使理論成本較高，若近期市場實際成交/議價結果顯示有下修空間，請在「合理市場單價」中反映此趨勢。
+
 請產出：
-1. 談判策略與風險提示 (Markdown)
+1. 談判策略與風險提示 (Markdown) - 需包含本次權重校正的邏輯說明。
 2. 合理市場單價
 3. 成本細項拆解 (包含數學算式)
 
@@ -213,7 +227,6 @@ ${learningContext}
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -262,11 +275,23 @@ export async function consolidateSpecsAction(
       補充規格：${suppSpecsText}
       時間區間：${quoteTimeframe}
       
-      請以 JSON 格式回傳彙整後的規格與總數量：
+      請以 JSON 格式回傳彙整後的規格與總數量。
+      請特別注意：如果不同來源（附件或補充規格）之間存在「矛盾」或「衝突」（例如 A 說要紅色，B 說要藍色），請在該項目標註 hasContradiction: true。
+      
+      JSON 格式範例：
       {
-        "specs": [{"category": "分類", "content": "內容", "source": "來源", "warning": "警告 (選填)"}],
+        "specs": [
+          {
+            "category": "分類", 
+            "content": "內容", 
+            "source": "來源", 
+            "warning": "警告或補充 (選填)",
+            "hasContradiction": false
+          }
+        ],
         "totalQuantity": 100
       }
+重要：直接輸出純 JSON 字串，絕對不要使用 Markdown 的 code block 標籤（例如三個反引號與 json 字眼）。
     `
   });
 
@@ -274,12 +299,19 @@ export async function consolidateSpecsAction(
     model: GEMINI_MODEL,
     contents,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json'
     }
   });
 
-  return JSON.parse(response.text || '{}');
+  const rawText = response.text || '{}';
+  const cleanJson = rawText.replace(/\s*```json\s*/g, '').replace(/\s*```\s*/g, '').trim();
+
+  try {
+    return JSON.parse(cleanJson);
+  } catch (error) {
+    console.error('consolidateSpecsAction JSON 解析錯誤:', error);
+    return { specs: [], totalQuantity: 0 };
+  }
 }
 
 export async function fetchAlternativesAction(itemName: string): Promise<AlternativeProduct[]> {
@@ -290,7 +322,6 @@ export async function fetchAlternativesAction(itemName: string): Promise<Alterna
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json'
     }
   });
@@ -307,7 +338,6 @@ export async function fetchRecommendedVendorsAction(itemName: string): Promise<R
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json'
     }
   });
@@ -323,16 +353,15 @@ export async function handleChatMessageAction(
   systemInstruction: string
 ): Promise<string> {
   const ai = getGenAI();
-  const chat = ai.models.startChat({
+  const chat = ai.chats.create({
     model: GEMINI_MODEL,
     history: history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       systemInstruction
     }
   });
 
-  const result = await chat.sendMessage(`Context: ${context}\n\nUser: ${userMessage}`);
+  const result = await chat.sendMessage({ message: `Context: ${context}\n\nUser: ${userMessage}` });
   return result.text || '';
 }
 
@@ -346,7 +375,7 @@ export async function generateDiffAnalysisAction(
   const response = await ai.models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
-    config: { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+    config: {}
   });
 
   return response.text || '';
@@ -386,7 +415,6 @@ ${inputB}
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -451,7 +479,6 @@ ${JSON.stringify(items, null, 2)}
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -492,7 +519,7 @@ export async function generatePhase2NegotiationStrategyAction(
   const response = await ai.models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
-    config: { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+    config: {}
   });
   return response.text || '';
 }
@@ -513,7 +540,6 @@ export async function generateCostJustificationAction(
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -539,17 +565,24 @@ export async function handleGenericChatAction(
   systemInstruction: string
 ): Promise<{ text: string; data?: any }> {
   const ai = getGenAI();
-  const chat = ai.models.startChat({
+  const chat = ai.chats.create({
     model: GEMINI_MODEL,
     history: history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      systemInstruction,
-      responseMimeType: 'application/json'
+      systemInstruction
     }
   });
 
-  const prompt = `Context: ${JSON.stringify(context)}\n\nUser: ${userMessage}\n\n請以 JSON 格式回覆：{"text": "回覆文字", "data": {...}}`;
-  const result = await chat.sendMessage(prompt);
-  return JSON.parse(result.text || '{"text": "解析錯誤"}');
+  const prompt = `Context: ${JSON.stringify(context)}\n\nUser: ${userMessage}\n\n重要：請直接輸出純 JSON 格式，絕對不要使用 Markdown 標籤（如 \`\`\`json）。回覆格式：{"text": "回覆文字", "data": {...}}`;
+  const result = await chat.sendMessage({ message: prompt });
+  const rawText = result.text || '';
+
+  // 優先嘗試尋找並解析 JSON 物件
+  const extracted = extractJsonObjectFromText(rawText);
+  if (extracted && extracted.text) {
+    return extracted;
+  }
+
+  // 如果解析失敗，則將原始文字視為純文字回覆
+  return { text: rawText || "抱歉，系統目前無法產生有效回覆。", data: {} };
 }

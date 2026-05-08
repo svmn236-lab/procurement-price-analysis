@@ -13,6 +13,8 @@ import { Phase2Comparison } from "./procurement/Phase2Comparison";
 import { Phase3Consolidation } from "./procurement/Phase3Consolidation";
 import { AIInsights } from "./procurement/AIInsights";
 import { OverallAIChat } from "./procurement/OverallAIChat";
+import { SpecSummaryModal } from "./procurement/SpecSummaryModal";
+import { ItemClarificationModal } from "./procurement/ItemClarificationModal";
 
 export default function ProcurementApp() {
   const {
@@ -58,6 +60,19 @@ export default function ProcurementApp() {
     handleVendorQuotePdfSelected,
     handleEditPhase2Row,
     handleDeletePhase2Row,
+    handlePhase2QuoteVersionChange,
+    updateRowGrouping,
+    handleConfirmSpecs,
+    saveEditing,
+    isItemModalOpen,
+    setIsItemModalOpen,
+    itemChatMessages,
+    setItemChatMessages,
+    itemChatInput,
+    setItemChatInput,
+    isItemChatLoading,
+    handleSendItemChatMessage,
+    proposedItemDescription,
     handler,
     handlingSection,
     historyFeedback,
@@ -125,9 +140,15 @@ export default function ProcurementApp() {
     supplementarySpecs,
     toggleNegotiationForm,
     totalQty,
-    updateRowGrouping,
     vendorPdfInputRef,
-    vendors
+    vendors,
+    showSpecSummary,
+    setShowSpecSummary,
+    consolidatedSpecs,
+    editingSpecIndex,
+    setEditingSpecIndex,
+    editingContent,
+    setEditingContent,
   } = useProcurement();
 
   const [editingRowItem, setEditingRowItem] = React.useState<string | null>(null);
@@ -268,10 +289,6 @@ export default function ProcurementApp() {
                 phase2={phase2}
                 handleBatchGeneratePhase2Analysis={handleBatchGeneratePhase2Analysis}
                 isPhase2AnalysisLoading={isPhase2AnalysisLoading}
-                editingRowItem={editingRowItem}
-                setEditingRowItem={setEditingRowItem}
-                editFormData={editFormData}
-                setEditFormData={setEditFormData}
                 handleSelectPhase2AnalysisItem={handleSelectPhase2AnalysisItem}
                 selectedAnalysisItem={selectedAnalysisItem}
                 updateRowGrouping={updateRowGrouping}
@@ -279,6 +296,7 @@ export default function ProcurementApp() {
                 expandedNegotiationItems={expandedNegotiationItems}
                 handleEditPhase2Row={handleEditPhase2Row}
                 handleDeletePhase2Row={handleDeletePhase2Row}
+                handlePhase2QuoteVersionChange={handlePhase2QuoteVersionChange}
                 saveNegotiationRecord={saveNegotiationRecord}
                 regenerateNegotiationStrategy={regenerateNegotiationStrategy}
                 phase2ChatInput={phase2ChatInput}
@@ -302,6 +320,32 @@ export default function ProcurementApp() {
           </div>
         </div>
       </div>
+
+      <SpecSummaryModal
+        isOpen={showSpecSummary}
+        onClose={() => setShowSpecSummary(false)}
+        specs={consolidatedSpecs}
+        onConfirm={handleConfirmSpecs}
+        isConsolidating={isConsolidating}
+        editingIndex={editingSpecIndex}
+        setEditingIndex={setEditingSpecIndex}
+        editingContent={editingContent}
+        setEditingContent={setEditingContent}
+        saveEditing={saveEditing}
+      />
+
+      <ItemClarificationModal
+        isOpen={isItemModalOpen}
+        onClose={() => setIsItemModalOpen(false)}
+        messages={itemChatMessages}
+        onSendMessage={handleSendItemChatMessage}
+        input={itemChatInput}
+        setInput={setItemChatInput}
+        isLoading={isItemChatLoading}
+        proposedDescription={proposedItemDescription}
+        confirmedDescription={confirmedItemDescription}
+        setConfirmedDescription={setConfirmedItemDescription}
+      />
     </div>
   );
 }

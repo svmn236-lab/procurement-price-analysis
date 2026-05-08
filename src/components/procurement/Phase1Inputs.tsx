@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { Plus, FolderOpen, LayoutList, ChevronUp, ChevronDown, FileText, Trash2, Upload, RefreshCw, Lightbulb, CheckCircle2, Loader2, Sparkles, BrainCircuit } from "lucide-react";
+import { Plus, FolderOpen, LayoutList, ChevronUp, ChevronDown, FileText, Trash2, Upload, RefreshCw, Lightbulb, CheckCircle2, Loader2, Sparkles, BrainCircuit, Camera } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -143,9 +143,28 @@ export const Phase1Inputs: React.FC<Phase1InputsProps> = ({
                       <input type="text" value={docNumber} onChange={(e) => setDocNumber(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:border-blue-500 outline-none" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
+                      <div className="relative">
                         <label className="label-caps">隸屬部門</label>
-                        <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:border-blue-500 outline-none" />
+                        <input
+                          type="text"
+                          value={department}
+                          onChange={(e) => setDepartment(e.target.value)}
+                          className={cn(
+                            "w-full p-2 border rounded-lg text-sm focus:border-blue-500 outline-none transition-all",
+                            (department === '綜合企劃部' || department === '財務部')
+                              ? "border-amber-400 bg-amber-50"
+                              : "border-slate-200"
+                          )}
+                        />
+                        {(department === '綜合企劃部' || department === '財務部') && (
+                          <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="text-[10px] text-amber-700 font-bold mt-1"
+                          >
+                            ⚠️ 本系統目前不適用於綜合企劃部與財務部之購案需求。
+                          </motion.p>
+                        )}
                       </div>
                       <div>
                         <label className="label-caps">隸屬科別</label>

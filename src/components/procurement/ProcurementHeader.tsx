@@ -28,6 +28,9 @@ export const ProcurementHeader: React.FC<ProcurementHeaderProps> = ({
       <header className="card-premium p-6 mb-8 border-l-8 border-brand-primary flex flex-col md:flex-row md:items-center justify-between gap-6 glass-effect">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-slate-800">採購發包決策輔助系統</h1>
+          <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">
+            Scope: General Procurement (Excluding: 綜合企劃部, 財務部)
+          </p>
           <div className="mt-4">
             <input
               type="text"

@@ -72,6 +72,7 @@ export interface Phase2State {
   negotiationStrategy: string;
   negotiationRecords: NegotiationRecord[];
   phase2ChatMessages: { role: 'user' | 'assistant', text: string }[];
+  quoteVersion?: string;
 }
 
 export interface Phase3State {

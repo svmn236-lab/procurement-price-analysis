@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
-import { BarChart2, Plus, RefreshCw, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LayoutList, Loader2, CheckCircle2, TrendingDown } from "lucide-react";
+import { BarChart2, Plus, RefreshCw, LayoutList, Loader2, CheckCircle2, TrendingDown } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn } from "@/lib/utils";
 import { Phase2State, Phase3State } from "@/types/procurement";
 
