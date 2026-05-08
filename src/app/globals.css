@@ -1,3 +1,135 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-main: #f8fafc; /* slate-50 */
+    --brand-primary: #ef4444; /* red-600 */
+    --brand-blue: #2563eb; /* blue-600 */
+    --brand-emerald: #10b981; /* emerald-600 */
+    --brand-violet: #8b5cf6; /* violet-600 */
+    --brand-amber: #f59e0b; /* amber-600 */
+    
+    --shadow-premium: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+    --glass-bg: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.2);
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  
+  h1, h2, h3, h4 {
+    @apply tracking-tight font-black;
+  }
+}
+
+@layer components {
+  /* Semantic Naming for Components */
+  
+  .layout-container {
+    @apply max-w-7xl mx-auto px-4 md:px-8 py-8;
+  }
+
+  .card-base {
+    @apply bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden transition-all duration-300;
+  }
+  
+  .card-premium {
+    @apply bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden transition-all duration-500 hover:shadow-2xl;
+  }
+
+  .card-header-btn {
+    @apply w-full flex items-center justify-between p-4 bg-slate-50/50 hover:bg-slate-100/80 transition-colors;
+  }
+
+  /* Glassmorphism */
+  .glass-effect {
+    @apply backdrop-blur-md bg-white/70 border border-white/20;
+  }
+
+  /* Button Styles */
+  .btn-base {
+    @apply flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold transition-all duration-300 text-sm whitespace-nowrap active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn-base bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200;
+  }
+
+  .btn-success {
+    @apply btn-base bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-200;
+  }
+
+  .btn-violet {
+    @apply btn-base bg-violet-600 text-white hover:bg-violet-700 hover:shadow-lg hover:shadow-violet-200;
+  }
+
+  .btn-amber {
+    @apply btn-base bg-amber-500 text-white hover:bg-amber-600 hover:shadow-lg hover:shadow-amber-200;
+  }
+
+  .btn-ghost {
+    @apply btn-base bg-slate-100 text-slate-600 hover:bg-slate-200;
+  }
+  
+  .btn-danger {
+    @apply btn-base bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700;
+  }
+
+  /* Input Styles */
+  .input-base {
+    @apply w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all duration-300 placeholder:text-slate-400;
+  }
+
+  .label-caps {
+    @apply block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1;
+  }
+
+  /* Navigation */
+  .nav-tabs-container {
+    @apply mb-8 flex items-center gap-0 bg-white/80 backdrop-blur-md rounded-3xl shadow-lg border border-slate-200 overflow-hidden;
+  }
+
+  .nav-tab {
+    @apply flex-1 px-6 py-4 font-black text-xs uppercase tracking-widest transition-all duration-500 relative flex items-center justify-center gap-2 text-slate-400 hover:text-slate-600 bg-transparent;
+  }
+
+  .nav-tab-active {
+    @apply text-blue-700 bg-blue-50/50 border-b-4 border-blue-600;
+  }
+
+  /* Table Styles */
+  .table-cost-summary {
+    @apply w-full text-left border-collapse min-w-full;
+  }
+
+  .table-th {
+    @apply px-5 py-4 bg-slate-50/80 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100;
+  }
+  
+  /* Status Badges */
+  .badge {
+    @apply px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border;
+  }
+  
+  .badge-blue { @apply badge bg-blue-50 text-blue-700 border-blue-100; }
+  .badge-emerald { @apply badge bg-emerald-50 text-emerald-700 border-emerald-100; }
+  .badge-violet { @apply badge bg-violet-50 text-violet-700 border-violet-100; }
+  .badge-amber { @apply badge bg-amber-50 text-amber-700 border-amber-100; }
+  
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+  }
+}
